@@ -20,15 +20,44 @@ Designentscheidungen (erste Version):
 - Lokale Speicherung in `kaizen.db` (SQLite)
 - Einfache Exportfunktion nach JSON
 - Deutsche Benutzeroberfläche
+- Fokus auf ADHS: Brain Dump, Daily Highlight, Micro-Commitment, Timer und Gamification
 
-Nächste Schritte: ADHS-spezifische Anpassungen, Presets, Sync/Cloud-Optionen und UI-Feinschliff.
+Features:
+- Brain Dump: schneller Kopf frei machen und spontane Gedanken festhalten
+- Daily Highlight: nur eine Schlüsselfrage als Fokus für den Tag
+- Micro-Commitment: winzige 2-Minuten-Aufgaben zum Starten
+- Stoppuhr / Start-Stop-Buttons für aktive Aufgaben
+- Punkte- und Levelsystem zur Gamification
+- Sync/Export: JSON-Export und optionaler GitHub-Gist-Sync
+- Beispiel-Daten mit Reset-Funktion zur schnellen Demo
+- Anpassbare Einstellungen für Punktvergabe, Level-Schwellen und Standard-Micro-Commit
 
-Beispieldaten & Reset:
-- Die App bietet eine Option, Beispiel‑Daten einzufügen (Sidebar)
-- Beispiel‑Daten sind mit dem Tag `sample_data` markiert und können separat gelöscht werden
-- Es gibt einen bestätigten Komplett-Reset, der alle Einträge löscht (Eingabe `DELETE`)
+Setup:
+```bash
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-Presets / Einstellungen:
-- In der Sidebar gibt es ein Einstellungs-Panel, um `Punkte pro Aufgabe`, `Punkte pro Level` und `Standard-Micro-Commit` zu konfigurieren.
-- Einstellungen werden in der lokalen Datenbank (`settings` Tabelle) gespeichert und bleiben erhalten.
-- Es gibt eine Schaltfläche zum Zurücksetzen auf Standardwerte.
+Start:
+```bash
+streamlit run app.py
+```
+
+Repository:
+- GitHub: https://github.com/GoldmanBlack/kaizen
+
+Nutzung:
+1. Öffne die App im Browser.
+2. Fülle im Brain Dump deine Gedanken und Ideen ein.
+3. Setze ein Daily Highlight als deine wichtigste Aufgabe.
+4. Starte ein Micro-Commitment und nutze den Timer, um den ersten Schritt zu machen.
+5. Markiere Aufgaben als erledigt, um Punkte zu sammeln und im Level aufzusteigen.
+
+Hinweise:
+- `kaizen.db` wird lokal im Projektverzeichnis erstellt.
+- In der Sidebar kannst du Beispiel-Daten hinzufügen oder komplett zurücksetzen.
+- Nutze `Einstellungen speichern`, um Punkteschwellen und Timer-Defaults anzupassen.
+- Wenn du GitHub-Gist-Sync nutzen willst, musst du den Token lokal einfügen und `gist` Berechtigungen erlauben.
+
+Nächste Schritte: Zusätzliche ADHS-Anpassungen, UI-Design, mobile Darstellung und erweitertes Reporting.
