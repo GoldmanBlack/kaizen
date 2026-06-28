@@ -225,7 +225,7 @@ def render_start_page():
     st.write("\n")
     if st.button("Tag starten", key="start_day"):
         st.session_state.page = "Heute"
-        st.experimental_rerun()
+        st.rerun()
     st.markdown("---")
     st.markdown("""
     ### Deine Bereiche
@@ -248,60 +248,59 @@ def main():
 
     if page == "Start":
         render_start_page()
-        return
+    
+    elif page == "Heute":
+        st.title("Kaizen — Tageslog (ADHS-freundlich)")
+        st.markdown("""
+        Einfache 3‑Schritte-Tageseinheit: Brain Dump, Daily Highlight, Micro-Commitment.
+        Ziel: den Kopf leeren, eine einzige Priorität setzen und mit einem winzigen Schritt Momentum erzeugen.
+        """)
 
-    st.title("Kaizen — Tageslog (ADHS-freundlich)")
-    st.markdown("""
-    Einfache 3‑Schritte-Tageseinheit: Brain Dump, Daily Highlight, Micro-Commitment.
-    Ziel: den Kopf leeren, eine einzige Priorität setzen und mit einem winzigen Schritt Momentum erzeugen.
-    """)
+        # Brain Dump
+        st.header("Brain Dump — Alles raus")
+        with st.form("brain_form"):
+            brain_text = st.text_area("Schreib alles auf, was dir gerade im Kopf ist", height=120)
+            tags = st.text_input("Tags (Komma-getrennt)")
+            submitted = st.form_submit_button("Hinzufügen")
+            if submitted and brain_text.strip():
+                add_entry("brain", brain_text.strip(), tags=tags)
+                st.success("Gespeichert — gut gemacht.")
 
-    # Brain Dump
-    st.header("Brain Dump — Alles raus")
-    with st.form("brain_form"):
-        brain_text = st.text_area("Schreib alles auf, was dir gerade im Kopf ist", height=120)
-        tags = st.text_input("Tags (Komma-getrennt)")
-        submitted = st.form_submit_button("Hinzufügen")
-        if submitted and brain_text.strip():
-            add_entry("brain", brain_text.strip(), tags=tags)
-            st.success("Gespeichert — gut gemacht.")
+        # Daily Highlight
+        st.header("Daily Highlight — EINE Aufgabe")
+        today_entries = get_today_entries()
+        brain_texts = [r[2] for r in today_entries if r[1]=="brain"]
+        with st.form("highlight_form"):
+            choice = st.selectbox("Aus Brain Dump wählen (optional)", [""] + brain_texts)
+            highlight = st.text_input("Oder tippe eine neue Highlight-Aufgabe", value="" if not choice else choice)
+            tags = st.text_input("Tags (optional)")
+            estimate = st.number_input("Geschätzte Minuten (optional)", min_value=0, step=5)
+            date_input = st.date_input("Fälligkeit / Eintragsdatum", value=date.today())
+            set_hl = st.form_submit_button("Als Daily Highlight setzen")
+            if set_hl and highlight.strip():
+                add_entry("highlight", highlight.strip(), tags=tags, estimate=estimate, entry_date=date_input.isoformat())
+                st.success("Daily Highlight gesetzt — fokussiere dich auf diese Aufgabe.")
 
-    # Daily Highlight
-    st.header("Daily Highlight — EINE Aufgabe")
-    today_entries = get_today_entries()
-    brain_texts = [r[2] for r in today_entries if r[1]=="brain"]
-    with st.form("highlight_form"):
-        choice = st.selectbox("Aus Brain Dump wählen (optional)", [""] + brain_texts)
-        highlight = st.text_input("Oder tippe eine neue Highlight-Aufgabe", value="" if not choice else choice)
-        tags = st.text_input("Tags (optional)")
-        estimate = st.number_input("Geschätzte Minuten (optional)", min_value=0, step=5)
-        date_input = st.date_input("Fälligkeit / Eintragsdatum", value=date.today())
-        set_hl = st.form_submit_button("Als Daily Highlight setzen")
-        if set_hl and highlight.strip():
-            add_entry("highlight", highlight.strip(), tags=tags, estimate=estimate, entry_date=date_input.isoformat())
-            st.success("Daily Highlight gesetzt — fokussiere dich auf diese Aufgabe.")
+        # Micro-Commitment
+        st.header("Micro-Commitment — 2 Minuten")
+        with st.form("micro_form"):
+            micro = st.text_input("2-Minuten-Aktion (z.B. E‑Mail beantworten)")
+            tags = st.text_input("Tags (optional)")
+            date_input = st.date_input("Fälligkeit / Eintragsdatum", value=date.today())
+            start = st.form_submit_button("Start 2-Minuten")
+            if start and micro.strip():
+                add_entry("micro", micro.strip(), tags=tags, entry_date=date_input.isoformat())
+                st.info("Micro-Commitment gespeichert. Starte den Timer unten.")
 
-    # Micro-Commitment
-    st.header("Micro-Commitment — 2 Minuten")
-    with st.form("micro_form"):
-        micro = st.text_input("2-Minuten-Aktion (z.B. E‑Mail beantworten)")
-        tags = st.text_input("Tags (optional)")
-        date_input = st.date_input("Fälligkeit / Eintragsdatum", value=date.today())
-        start = st.form_submit_button("Start 2-Minuten")
-        if start and micro.strip():
-            add_entry("micro", micro.strip(), tags=tags, entry_date=date_input.isoformat())
-            st.info("Micro-Commitment gespeichert. Starte den Timer unten.")
+        if st.button("Timer 2 Minuten anzeigen/starten"):
+            placeholder = st.empty()
+            total = 120
+            for i in range(total, -1, -1):
+                mins, secs = divmod(i, 60)
+                placeholder.markdown(f"**Verbleibend:** {mins:02d}:{secs:02d}")
+                time.sleep(1)
+            placeholder.markdown("**Fertig!** Gut gemacht. Markiere dein Micro-Commitment als erledigt.")
 
-    if st.button("Timer 2 Minuten anzeigen/starten"):
-        placeholder = st.empty()
-        total = 120
-        for i in range(total, -1, -1):
-            mins, secs = divmod(i, 60)
-            placeholder.markdown(f"**Verbleibend:** {mins:02d}:{secs:02d}")
-            time.sleep(1)
-        placeholder.markdown("**Fertig!** Gut gemacht. Markiere dein Micro-Commitment als erledigt.")
-
-    if st.session_state.page == "Heute":
         st.header("Heute — Einträge")
         rows = get_today_entries()
         if not rows:
@@ -329,7 +328,7 @@ def main():
                     start_btn = st.button("Start", key=f"start_{eid}")
                     if start_btn:
                         start_task(eid)
-                        st.experimental_rerun()
+                        st.rerun()
                     stop_btn = st.button("Stop", key=f"stop_{eid}")
                     if stop_btn:
                         elapsed = 0
@@ -341,7 +340,7 @@ def main():
                                 elapsed = 0
                         pts = compute_points(elapsed, estimate)
                         toggle_done(eid, True, elapsed_seconds=elapsed, points=pts)
-                        st.experimental_rerun()
+                        st.rerun()
                 with cols[3]:
                     new = st.checkbox("Erledigt", value=bool(done), key=f"done_{eid}")
                     if new != bool(done):
@@ -357,10 +356,11 @@ def main():
                             toggle_done(eid, new, elapsed_seconds=elapsed, points=pts)
                         else:
                             toggle_done(eid, new, elapsed_seconds=0)
-                        st.experimental_rerun()
-
-    if st.session_state.page == "Alle Einträge":
-        st.header("Alle Einträge — Sammelübersicht")
+                        st.rerun()
+    
+    elif page == "Alle Einträge":
+        st.title("Kaizen — Alle Einträge")
+        st.header("Sammelübersicht")
         all_rows = get_all_entries()
         if not all_rows:
             st.write("Noch keine Einträge vorhanden.")
@@ -387,7 +387,7 @@ def main():
                         start_btn = st.button("Start", key=f"all_start_{eid}")
                         if start_btn:
                             start_task(eid)
-                            st.experimental_rerun()
+                            st.rerun()
                         stop_btn = st.button("Stop", key=f"all_stop_{eid}")
                         if stop_btn:
                             elapsed = 0
@@ -399,7 +399,7 @@ def main():
                                     elapsed = 0
                             pts = compute_points(elapsed, estimate)
                             toggle_done(eid, True, elapsed_seconds=elapsed, points=pts)
-                            st.experimental_rerun()
+                            st.rerun()
                 with cols[3]:
                     new = st.checkbox("Erledigt", value=bool(done), key=f"all_done_{eid}")
                     if new != bool(done):
@@ -415,125 +415,9 @@ def main():
                             toggle_done(eid, new, elapsed_seconds=elapsed, points=pts)
                         else:
                             toggle_done(eid, new, elapsed_seconds=0)
-                        st.experimental_rerun()
+                        st.rerun()
 
-    # Scoring and level
-    st.header("Heute — Einträge")
-    rows = get_today_entries()
-    if not rows:
-        st.write("Noch nichts für heute — fang mit einem Brain Dump an.")
-    else:
-        for r in rows:
-            eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at = r
-            cols = st.columns([0.55, 0.15, 0.15, 0.15])
-            with cols[0]:
-                st.write(f"**{etype}** — {content}")
-                if tags:
-                    st.caption(f"Tags: {tags}")
-                if estimate:
-                    st.caption(f"Schätzung: {estimate} min")
-                st.caption(f"Datum: {entry_date}")
-                if started_at:
-                    st.caption(f"gestartet: {started_at}")
-                st.caption(f"erstellt: {created_at}")
-            with cols[1]:
-                if done:
-                    st.write(f"✅ {points} pts")
-                else:
-                    st.write("—")
-            with cols[2]:
-                start_btn = st.button("Start", key=f"start_{eid}")
-                if start_btn:
-                    start_task(eid)
-                    st.experimental_rerun()
-                stop_btn = st.button("Stop", key=f"stop_{eid}")
-                if stop_btn:
-                    elapsed = 0
-                    if started_at:
-                        try:
-                            sa = datetime.fromisoformat(started_at)
-                            elapsed = int((datetime.utcnow() - sa).total_seconds())
-                        except Exception:
-                            elapsed = 0
-                    pts = compute_points(elapsed, estimate)
-                    toggle_done(eid, True, elapsed_seconds=elapsed, points=pts)
-                    st.experimental_rerun()
-            with cols[3]:
-                new = st.checkbox("Erledigt", value=bool(done), key=f"done_{eid}")
-                if new != bool(done):
-                    if new:
-                        elapsed = 0
-                        if started_at:
-                            try:
-                                sa = datetime.fromisoformat(started_at)
-                                elapsed = int((datetime.utcnow() - sa).total_seconds())
-                            except Exception:
-                                elapsed = 0
-                        pts = compute_points(elapsed, estimate)
-                        toggle_done(eid, new, elapsed_seconds=elapsed, points=pts)
-                    else:
-                        toggle_done(eid, new, elapsed_seconds=0)
-                    st.experimental_rerun()
-
-    # All entries
-    st.header("Alle Einträge — Sammelübersicht")
-    all_rows = get_all_entries()
-    if not all_rows:
-        st.write("Noch keine Einträge vorhanden.")
-    else:
-        for r in all_rows:
-            eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at = r
-            cols = st.columns([0.55, 0.15, 0.15, 0.15])
-            with cols[0]:
-                st.write(f"**{entry_date} | {etype}** — {content}")
-                if tags:
-                    st.caption(f"Tags: {tags}")
-                if estimate:
-                    st.caption(f"Schätzung: {estimate} min")
-                if started_at:
-                    st.caption(f"gestartet: {started_at}")
-                st.caption(f"erstellt: {created_at}")
-            with cols[1]:
-                if done:
-                    st.write(f"✅ {points} pts")
-                else:
-                    st.write("—")
-            with cols[2]:
-                if not done:
-                    start_btn = st.button("Start", key=f"all_start_{eid}")
-                    if start_btn:
-                        start_task(eid)
-                        st.experimental_rerun()
-                    stop_btn = st.button("Stop", key=f"all_stop_{eid}")
-                    if stop_btn:
-                        elapsed = 0
-                        if started_at:
-                            try:
-                                sa = datetime.fromisoformat(started_at)
-                                elapsed = int((datetime.utcnow() - sa).total_seconds())
-                            except Exception:
-                                elapsed = 0
-                        pts = compute_points(elapsed, estimate)
-                        toggle_done(eid, True, elapsed_seconds=elapsed, points=pts)
-                        st.experimental_rerun()
-            with cols[3]:
-                new = st.checkbox("Erledigt", value=bool(done), key=f"all_done_{eid}")
-                if new != bool(done):
-                    if new:
-                        elapsed = 0
-                        if started_at:
-                            try:
-                                sa = datetime.fromisoformat(started_at)
-                                elapsed = int((datetime.utcnow() - sa).total_seconds())
-                            except Exception:
-                                elapsed = 0
-                        pts = compute_points(elapsed, estimate)
-                        toggle_done(eid, new, elapsed_seconds=elapsed, points=pts)
-                    else:
-                        toggle_done(eid, new, elapsed_seconds=0)
-                    st.experimental_rerun()
-
-    # Scoring and level
+    # Scoring and level (Sidebar - on all pages)
     level, progress, goal = get_level_and_progress()
     st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
     st.sidebar.progress(int(progress / goal * 100))
