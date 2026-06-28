@@ -70,6 +70,111 @@ def compute_points(elapsed_seconds, estimate_minutes):
     return base + bonus
 
 
+def get_setting(key, default=None):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT value FROM settings WHERE key=?', (key,))
+    row = c.fetchone()
+    conn.close()
+    if row:
+        return row[0]
+    return default
+
+
+def set_setting(key, value):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)', (key, str(value)))
+    conn.commit()
+    conn.close()
+
+
+def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0, entry_date=None):
+    now = datetime.utcnow().isoformat()
+    entry_date = entry_date or date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''INSERT INTO entries (entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, last_modified)
+                 VALUES (?,?,?,?,?,?,?,?,?)''',
+              (entry_type, content, tags or "", priority, estimate, points, now, entry_date, now))
+    conn.commit()
+    conn.close()
+
+
+def get_today_entries():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at
+                 FROM entries WHERE entry_date=? ORDER BY id DESC''', (date.today().isoformat(),))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def get_all_entries():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at
+                 FROM entries ORDER BY entry_date DESC, id DESC''')
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def toggle_done(entry_id, new, elapsed_seconds=0, points=None):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    now = datetime.utcnow().isoformat()
+    if new:
+        if points is None:
+            points = POINTS_PER_TASK
+        c.execute('UPDATE entries SET done=1, completed_at=?, elapsed_seconds=?, points=?, last_modified=?, started_at=NULL WHERE id=?',
+                  (now, elapsed_seconds, points, now, entry_id))
+    else:
+        c.execute('UPDATE entries SET done=0, completed_at=NULL, elapsed_seconds=0, points=0, last_modified=?, started_at=NULL WHERE id=?',
+                  (now, entry_id))
+    conn.commit()
+    conn.close()
+
+
+def total_points():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT SUM(points) FROM entries')
+    s = c.fetchone()[0] or 0
+    conn.close()
+    return s
+
+
+def get_level_and_progress():
+    try:
+        level_step = int(get_setting('level_step') or LEVEL_STEP)
+    except Exception:
+        level_step = LEVEL_STEP
+    pts = total_points()
+    level = pts // level_step
+    progress = pts % level_step
+    return level, progress, level_step
+
+
+def start_task(entry_id):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('UPDATE entries SET started_at=?, last_modified=? WHERE id=?', (now, now, entry_id))
+    conn.commit()
+    conn.close()
+
+
+def clear_start(entry_id):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('UPDATE entries SET started_at=NULL, last_modified=? WHERE id=?', (now, entry_id))
+    conn.commit()
+    conn.close()
+
+
 ### Sample data / reset helpers
 def insert_sample_data():
     samples = [
