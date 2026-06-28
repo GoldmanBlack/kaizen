@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import sqlite3
 from datetime import datetime, date, timedelta
 import time
@@ -41,147 +42,49 @@ def init_db():
         try:
             c.execute('ALTER TABLE entries ADD COLUMN started_at TEXT')
         except Exception:
-            pass
-    # settings table
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS settings (
-        key TEXT PRIMARY KEY,
-        value TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
+                # Load static CSS/JS we added to workspace and embed via components.html
+                stats = get_analytics_stats()
+                try:
+                    with open('static/styles.css', 'r', encoding='utf-8') as f:
+                        css = f.read()
+                except Exception:
+                    css = ''
+                try:
+                    with open('static/rain.js', 'r', encoding='utf-8') as f:
+                        js = f.read()
+                except Exception:
+                    js = ''
 
+                # Build the HTML that contains the canvas and the stats overlay
+                html_embedded = f"""
+                <div style="width:100%;max-width:1100px;margin:0 auto;">
+                  <style>{css}</style>
+                  <canvas id="rain" style="width:100%;height:480px;display:block;border-radius:16px;overflow:hidden;"></canvas>
+                  <div style="position:relative;top:-280px;z-index:12;display:flex;justify-content:center;pointer-events:none;padding:20px;">
+                    <div style="background:rgba(8,12,20,0.45);backdrop-filter:blur(6px);padding:18px 26px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);pointer-events:auto;">
+                      <div style="text-align:center;color:#00d4ff;font-weight:700;font-size:28px;margin-bottom:6px">🌧️ KAIZEN</div>
+                      <div style="text-align:center;color:#e6eef6;margin-bottom:12px">Start deinen perfekten Tag • Eins nach dem anderen</div>
+                      <div style="display:flex;gap:10px;justify-content:center">
+                        <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+                          <div style="font-size:20px;font-weight:700">{stats['completed']}</div>
+                          <div style="font-size:12px;color:#dfefff">Aufgaben erledigt</div>
+                        </div>
+                        <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+                          <div style="font-size:20px;font-weight:700">{stats['total_minutes']}</div>
+                          <div style="font-size:12px;color:#dfefff">Minuten investiert</div>
+                        </div>
+                        <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+                          <div style="font-size:20px;font-weight:700">{total_points()}</div>
+                          <div style="font-size:12px;color:#dfefff">Punkte gesammelt</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <script>{js}</script>
+                </div>
+                """
 
-def get_setting(key, default=None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT value FROM settings WHERE key=?', (key,))
-    row = c.fetchone()
-    conn.close()
-    if row:
-        return row[0]
-    return default
-
-
-def set_setting(key, value):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)', (key, str(value)))
-    conn.commit()
-    conn.close()
-
-def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0, entry_date=None):
-    now = datetime.utcnow().isoformat()
-    entry_date = entry_date or date.today().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''INSERT INTO entries (entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, last_modified)
-                 VALUES (?,?,?,?,?,?,?,?,?)''',
-              (entry_type, content, tags or "", priority, estimate, points, now, entry_date, now))
-    conn.commit()
-    conn.close()
-
-def get_today_entries():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at
-                 FROM entries WHERE entry_date=? ORDER BY id DESC''', (date.today().isoformat(),))
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def get_all_entries():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at
-                 FROM entries ORDER BY entry_date DESC, id DESC''')
-    rows = c.fetchall()
-    conn.close()
-    return rows
-
-def toggle_done(entry_id, new, elapsed_seconds=0, points=None):
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    now = datetime.utcnow().isoformat()
-    if new:
-        # mark completed
-        if points is None:
-            points = POINTS_PER_TASK
-        c.execute('UPDATE entries SET done=1, completed_at=?, elapsed_seconds=?, points=?, last_modified=?, started_at=NULL WHERE id=?',
-                  (now, elapsed_seconds, points, now, entry_id))
-    else:
-        c.execute('UPDATE entries SET done=0, completed_at=NULL, elapsed_seconds=0, points=0, last_modified=?, started_at=NULL WHERE id=?',
-                  (now, entry_id))
-    conn.commit()
-    conn.close()
-
-def total_points():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('SELECT SUM(points) FROM entries')
-    s = c.fetchone()[0] or 0
-    conn.close()
-    return s
-
-def get_level_and_progress():
-    try:
-        level_step = int(get_setting('level_step') or LEVEL_STEP)
-    except Exception:
-        level_step = LEVEL_STEP
-    pts = total_points()
-    level = pts // level_step
-    progress = pts % level_step
-    return level, progress, level_step
-
-### GitHub Gist sync helpers (optional)
-import requests
-
-def gist_save(token, gist_id, data_dict):
-    url = f"https://api.github.com/gists/{gist_id}"
-    headers = {"Authorization": f"token {token}"}
-    files = {"kaizen.json": {"content": data_dict}}
-    r = requests.patch(url, json={"files": files}, headers=headers)
-    return r.status_code, r.text
-
-def gist_create(token, data_dict, description="Kaizen export"):
-    url = "https://api.github.com/gists"
-    headers = {"Authorization": f"token {token}"}
-    files = {"kaizen.json": {"content": data_dict}}
-    r = requests.post(url, json={"files": files, "description": description, "public": False}, headers=headers)
-    return r.status_code, r.json()
-
-
-def start_task(entry_id):
-    now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('UPDATE entries SET started_at=?, last_modified=? WHERE id=?', (now, now, entry_id))
-    conn.commit()
-    conn.close()
-
-
-def clear_start(entry_id):
-    now = datetime.utcnow().isoformat()
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    c.execute('UPDATE entries SET started_at=NULL, last_modified=? WHERE id=?', (now, entry_id))
-    conn.commit()
-    conn.close()
-
-
-def compute_points(elapsed_seconds, estimate_minutes):
-    elapsed_minutes = int(round(elapsed_seconds / 60)) if elapsed_seconds else 0
-    try:
-        base = int(get_setting('points_per_task') or POINTS_PER_TASK)
-    except Exception:
-        base = POINTS_PER_TASK
-    bonus = 0
-    if estimate_minutes and estimate_minutes > 0:
-        saved = max(0, estimate_minutes - elapsed_minutes)
-        bonus = saved * 2
-    # small speed bonus for very fast completion (<5min)
-    if elapsed_minutes <= 5:
+                components.html(html_embedded, height=560, scrolling=False)
         bonus += 1
     return base + bonus
 
