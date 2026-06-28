@@ -1,0 +1,12 @@
+html,body{height:100%;margin:0}
+body{background:linear-gradient(180deg,#0b1220 0%,#061014 60%,#031018 100%);overflow:hidden;font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+#rain{position:fixed;left:0;top:0;width:100%;height:100%;display:block}
+/* vignette and soft glass */
+body::before{content:"";position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 30%,rgba(255,255,255,0.02),transparent 40%),linear-gradient(180deg,rgba(0,0,0,0.15),rgba(0,0,0,0.45));mix-blend-mode:multiply}
+
+/* subtle bokeh lights at bottom */
+.bokeh{position:fixed;left:0;right:0;bottom:0;height:220px;pointer-events:none;filter:blur(30px);opacity:0.7}
+.bokeh .light{position:absolute;border-radius:50%;mix-blend-mode:screen}
+
+/* small responsive tweaks */
+@media (max-width:520px){}
