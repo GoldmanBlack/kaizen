@@ -311,160 +311,68 @@ def get_analytics_stats():
 
 # ========== LOFI START PAGE ==========
 def render_lofi_start_page():
-    """Coole Lofi Rain Japan Startseite"""
-    # CSS für Lofi Vibe
-    lofi_css = """
-    <style>
-    @import url('https://fonts.googleapis.com/css2?family=Kdam+Thmor+Pro&display=swap');
-    
-    /* Rain Animation */
-    @keyframes rain {
-        0% { transform: translateY(-100vh) translateX(0px); opacity: 1; }
-        100% { transform: translateY(100vh) translateX(0px); opacity: 0; }
-    }
-    
-    @keyframes fade_in {
-        0% { opacity: 0; transform: translateY(20px); }
-        100% { opacity: 1; transform: translateY(0); }
-    }
-    
-    @keyframes pulse {
-        0%, 100% { transform: scale(1); }
-        50% { transform: scale(1.05); }
-    }
-    
-    .lofi-container {
-        background: linear-gradient(135deg, #1a1a2e 0%, #0f3460 100%);
-        position: relative;
-        overflow: hidden;
-        padding: 60px 40px;
-        border-radius: 20px;
-        margin: 20px 0;
-        text-align: center;
-    }
-    
-    .rain {
-        position: absolute;
-        width: 2px;
-        height: 10px;
-        background: rgba(255, 255, 255, 0.3);
-        left: calc(var(--i) * 1%);
-        animation: rain 1s linear infinite;
-        animation-delay: calc(var(--i) * 0.1s);
-    }
-    
-    .lofi-content {
-        position: relative;
-        z-index: 10;
-        animation: fade_in 1s ease-out;
-    }
-    
-    .lofi-title {
-        font-size: 3.5em;
-        font-weight: bold;
-        color: #00d4ff;
-        margin: 20px 0;
-        text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
-        font-family: 'Kdam Thmor Pro', cursive;
-        letter-spacing: 2px;
-    }
-    
-    .lofi-subtitle {
-        font-size: 1.3em;
-        color: #e0e0e0;
-        margin: 15px 0;
-        font-style: italic;
-    }
-    
-    .lofi-button {
-        background: linear-gradient(135deg, #00d4ff, #0099cc);
-        border: none;
-        padding: 18px 50px;
-        font-size: 1.2em;
-        color: #1a1a2e;
-        border-radius: 50px;
-        cursor: pointer;
-        font-weight: bold;
-        margin-top: 30px;
-        transition: all 0.3s ease;
-        box-shadow: 0 0 30px rgba(0, 212, 255, 0.4);
-        animation: pulse 2s ease-in-out infinite;
-    }
-    
-    .lofi-button:hover {
-        transform: translateY(-3px);
-        box-shadow: 0 0 50px rgba(0, 212, 255, 0.8);
-    }
-    
-    .lofi-stats {
-        display: grid;
-        grid-template-columns: 1fr 1fr 1fr;
-        gap: 20px;
-        margin-top: 40px;
-    }
-    
-    .lofi-stat-box {
-        background: rgba(0, 212, 255, 0.1);
-        border: 2px solid rgba(0, 212, 255, 0.3);
-        padding: 20px;
-        border-radius: 15px;
-        color: #00d4ff;
-    }
-    
-    .lofi-stat-number {
-        font-size: 2.5em;
-        font-weight: bold;
-    }
-    
-    .lofi-stat-label {
-        font-size: 0.9em;
-        color: #e0e0e0;
-        margin-top: 10px;
-    }
-    </style>
-    """
-    
-    st.markdown(lofi_css, unsafe_allow_html=True)
-    
-    # HTML mit Rain Animation
+    """Embed the visual-only lofi rain as a full-width background section without borders."""
     stats = get_analytics_stats()
-    
-    html_content = f"""
-    <div class="lofi-container">
-        {"".join([f'<div class="rain" style="--i: {i};"></div>' for i in range(50)])}
-        
-        <div class="lofi-content">
-            <div class="lofi-title">🌧️ KAIZEN</div>
-            <div class="lofi-subtitle">Start deinen perfekten Tag • Eins nach dem anderen</div>
-            
-            <div class="lofi-stats">
-                <div class="lofi-stat-box">
-                    <div class="lofi-stat-number">{stats['completed']}</div>
-                    <div class="lofi-stat-label">Aufgaben erledigt</div>
-                </div>
-                <div class="lofi-stat-box">
-                    <div class="lofi-stat-number">{stats['total_minutes']}</div>
-                    <div class="lofi-stat-label">Minuten investiert</div>
-                </div>
-                <div class="lofi-stat-box">
-                    <div class="lofi-stat-number">{total_points()}</div>
-                    <div class="lofi-stat-label">Punkte gesammelt</div>
-                </div>
+    # Read the static CSS and JS we created
+    try:
+        with open('static/styles.css', 'r', encoding='utf-8') as f:
+            css = f.read()
+    except Exception:
+        css = ''
+    try:
+        with open('static/rain.js', 'r', encoding='utf-8') as f:
+            js = f.read()
+    except Exception:
+        js = ''
+
+    html = f"""
+    <div style="position:relative;width:100%;height:640px;margin: -40px 0 20px 0;">
+      <style>
+        html,body{{margin:0;padding:0;height:100%;}}
+        .lofi-bg{{position:absolute;inset:0;z-index:0;}}
+        .lofi-overlay{{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;height:100%;pointer-events:none}}
+        .stats-box{{background:rgba(8,12,20,0.45);backdrop-filter:blur(6px);padding:18px 26px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);pointer-events:auto;color:#dfefff}}
+        {css}
+      </style>
+
+      <canvas id="rain" class="lofi-bg" width="1600" height="640" style="width:100%;height:100%;display:block;border-radius:0;" ></canvas>
+
+      <div class="lofi-overlay">
+        <div class="stats-box">
+          <div style="text-align:center;font-weight:700;font-size:28px;color:#00d4ff">🌧️ KAIZEN</div>
+          <div style="text-align:center;margin:6px 0 12px;color:#dfefff">Start deinen perfekten Tag • Eins nach dem anderen</div>
+          <div style="display:flex;gap:10px;justify-content:center">
+            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+              <div style="font-size:20px;font-weight:700">{stats['completed']}</div>
+              <div style="font-size:12px;color:#dfefff">Aufgaben erledigt</div>
             </div>
+            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+              <div style="font-size:20px;font-weight:700">{stats['total_minutes']}</div>
+              <div style="font-size:12px;color:#dfefff">Minuten investiert</div>
+            </div>
+            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
+              <div style="font-size:20px;font-weight:700">{total_points()}</div>
+              <div style="font-size:12px;color:#dfefff">Punkte gesammelt</div>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <script>
+        {js}
+      </script>
     </div>
     """
-    
-    st.markdown(html_content, unsafe_allow_html=True)
-    
-    # Button zum Starten (normaler Streamlit-Button darunter)
+
+    components.html(html, height=720, scrolling=False)
+    # Start button below the full-width background
     st.write("")
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
         if st.button("🚀 Tag starten", use_container_width=True, key="lofi_start_btn"):
             st.session_state.page = "Heute"
             st.rerun()
-    
+
     st.write("")
     st.markdown("---")
     st.write("💡 **Was dich erwartet:** Brain Dump → Daily Highlight → Micro-Commitment")
