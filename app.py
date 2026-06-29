@@ -2131,6 +2131,105 @@ JSON-Format:
         return {"error": str(e)}
 
 
+def _build_tagesfokus_hero(done_count, total, pts_today, today_label):
+    pct      = done_count / total if total > 0 else 0
+    pct_int  = int(pct * 100)
+    r        = 80
+    circ     = 2 * 3.14159 * r   # ~502.65
+    offset   = circ * (1 - pct)
+
+    if pct < 0.3:
+        c1, c2, glow_col = "#e74c3c", "#c0392b", "rgba(231,76,60,0.55)"
+    elif pct < 0.6:
+        c1, c2, glow_col = "#f39c12", "#e67e22", "rgba(243,156,18,0.55)"
+    elif pct < 0.9:
+        c1, c2, glow_col = "#2ecc71", "#00d4ff", "rgba(46,204,113,0.55)"
+    else:
+        c1, c2, glow_col = "#00d4ff", "#a29bfe", "rgba(0,212,255,0.7)"
+
+    sparkles = ""
+    if pct >= 0.99:
+        sparkles = """
+        <div class="sparks">
+          <span>✦</span><span>✦</span><span>✦</span>
+          <span>✦</span><span>✦</span><span>✦</span>
+        </div>"""
+
+    return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:transparent;font-family:-apple-system,sans-serif;overflow:hidden}}
+.hero{{display:flex;align-items:center;justify-content:center;gap:40px;padding:10px 20px}}
+.ring-wrap{{position:relative;width:200px;height:200px;flex-shrink:0}}
+svg.ring{{width:200px;height:200px;transform:rotate(-90deg)}}
+.ring-track{{fill:none;stroke:rgba(255,255,255,0.06);stroke-width:14;stroke-linecap:round}}
+.ring-fill{{fill:none;stroke:url(#grad);stroke-width:14;stroke-linecap:round;
+  stroke-dasharray:{circ:.1f};stroke-dashoffset:{offset:.1f};
+  filter:drop-shadow(0 0 8px {glow_col});
+  transition:stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1)}}
+@keyframes pulse-glow{{0%,100%{{filter:drop-shadow(0 0 8px {glow_col})}}
+  50%{{filter:drop-shadow(0 0 18px {glow_col}) drop-shadow(0 0 32px {c1})}}}}
+.ring-fill{{animation:pulse-glow 2.4s ease-in-out infinite}}
+.center-text{{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  text-align:center;pointer-events:none}}
+.pct-num{{font-size:42px;font-weight:900;letter-spacing:-2px;
+  background:linear-gradient(135deg,{c1},{c2});
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  background-clip:text}}
+.pct-label{{font-size:11px;color:rgba(255,255,255,.35);font-weight:600;letter-spacing:1px;margin-top:-4px}}
+.stats{{display:flex;flex-direction:column;gap:12px}}
+.stat-pill{{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);
+  border-radius:14px;padding:10px 22px;min-width:140px}}
+.stat-val{{font-size:28px;font-weight:800;
+  background:linear-gradient(135deg,{c1},{c2});
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
+.stat-key{{font-size:11px;color:rgba(255,255,255,.4);font-weight:600;letter-spacing:.8px;margin-top:1px}}
+.date-label{{font-size:12px;color:rgba(255,255,255,.3);margin-top:10px;letter-spacing:.5px}}
+.sparks{{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}}
+.sparks span{{position:absolute;font-size:18px;animation:float-spark 1.8s ease-in-out infinite;
+  color:{c1};text-shadow:0 0 10px {c1}}}
+.sparks span:nth-child(1){{top:5%;left:50%;animation-delay:0s}}
+.sparks span:nth-child(2){{top:15%;left:80%;animation-delay:.3s}}
+.sparks span:nth-child(3){{top:15%;left:20%;animation-delay:.6s}}
+.sparks span:nth-child(4){{top:75%;left:10%;animation-delay:.9s}}
+.sparks span:nth-child(5){{top:75%;left:85%;animation-delay:1.2s}}
+.sparks span:nth-child(6){{top:90%;left:50%;animation-delay:1.5s}}
+@keyframes float-spark{{0%{{transform:translateY(0) scale(1);opacity:.8}}
+  50%{{transform:translateY(-18px) scale(1.3);opacity:1}}
+  100%{{transform:translateY(0) scale(1);opacity:.8}}}}
+</style></head><body>
+<div class="hero">
+  <div class="ring-wrap">
+    <svg class="ring" viewBox="0 0 200 200">
+      <defs>
+        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" style="stop-color:{c1}"/>
+          <stop offset="100%" style="stop-color:{c2}"/>
+        </linearGradient>
+      </defs>
+      <circle class="ring-track" cx="100" cy="100" r="{r}"/>
+      <circle class="ring-fill" cx="100" cy="100" r="{r}"/>
+    </svg>
+    <div class="center-text">
+      <div class="pct-num">{pct_int}%</div>
+      <div class="pct-label">ERLEDIGT</div>
+    </div>
+    {sparkles}
+  </div>
+  <div class="stats">
+    <div class="stat-pill">
+      <div class="stat-val">{done_count}<span style="font-size:16px;opacity:.5"> /{total}</span></div>
+      <div class="stat-key">AUFGABEN</div>
+    </div>
+    <div class="stat-pill">
+      <div class="stat-val">{pts_today}</div>
+      <div class="stat-key">PUNKTE HEUTE</div>
+    </div>
+    <div class="date-label">{today_label}</div>
+  </div>
+</div>
+</body></html>"""
+
+
 def render_ki_planner_section(api_key):
     """Renders the KI task planner inside the Planen page."""
     st.markdown("### 🤖 KI-Aufgabenplaner")
@@ -3495,11 +3594,10 @@ def render_tagesfokus_page():
     pts_today  = sum(r[6] for r in rows)
     pct        = done_count / total if total > 0 else 0
 
-    mc1, mc2, mc3 = st.columns(3)
-    mc1.metric("Aufgaben", f"{done_count} / {total}")
-    mc2.metric("Fortschritt", f"{int(pct * 100)} %")
-    mc3.metric("Punkte heute", pts_today)
-    st.progress(pct)
+    components.html(
+        _build_tagesfokus_hero(done_count, total, pts_today, today_label),
+        height=230
+    )
     st.markdown("---")
 
     if not rows:
@@ -3540,16 +3638,24 @@ def render_tagesfokus_page():
         steps = get_task_steps(eid)
         steps_html = ""
         if steps and not done:
-            done_s = sum(1 for s in steps if s['done'])
+            done_s  = sum(1 for s in steps if s['done'])
             total_s = len(steps)
-            pct_s  = done_s / total_s if total_s else 0
-            bar_w  = int(pct_s * 100)
+            next_step_idx = next((i for i, s in enumerate(steps) if not s['done']), None)
+            dots = ""
+            for i, s in enumerate(steps):
+                if s['done']:
+                    dots += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#00d4ff;box-shadow:0 0 7px #00d4ff,0 0 14px rgba(0,212,255,.4);margin-right:4px"></span>'
+                elif i == next_step_idx:
+                    # current step — pulsing
+                    dots += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#a29bfe;box-shadow:0 0 8px #a29bfe,0 0 18px rgba(162,155,254,.5);margin-right:4px;animation:dot-pulse 1.4s ease-in-out infinite"></span>'
+                else:
+                    dots += '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.15);margin-right:4px"></span>'
             steps_html = (
-                f'<div style="margin-top:6px">'
-                f'<span style="font-size:10px;color:rgba(255,255,255,.45)">Schritte: {done_s}/{total_s}</span>'
-                f'<div style="background:rgba(255,255,255,.1);border-radius:4px;height:4px;margin-top:3px">'
-                f'<div style="background:#00d4ff;width:{bar_w}%;height:4px;border-radius:4px;'
-                f'transition:width .3s"></div></div></div>'
+                f'<div style="margin-top:8px;display:flex;align-items:center;gap:4px">'
+                f'<style>@keyframes dot-pulse{{0%,100%{{box-shadow:0 0 8px #a29bfe,0 0 18px rgba(162,155,254,.5)}}50%{{box-shadow:0 0 14px #a29bfe,0 0 30px rgba(162,155,254,.8)}}}}</style>'
+                f'{dots}'
+                f'<span style="font-size:10px;color:rgba(255,255,255,.35);margin-left:6px">{done_s}/{total_s}</span>'
+                f'</div>'
             )
         analysis = get_task_analysis(eid)
         analysis_html = ""
