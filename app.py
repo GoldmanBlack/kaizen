@@ -2914,7 +2914,12 @@ URGENCY_CSS = """<style>
 # ========== PAGES ==========
 
 def render_lofi_start_page():
+    import requests as _req
+
     stats = get_analytics_stats()
+    today = date.today()
+
+    # ── Static files ──────────────────────────────────────────
     try:
         with open('static/styles.css', 'r', encoding='utf-8') as f:
             css = f.read()
@@ -2926,121 +2931,285 @@ def render_lofi_start_page():
     except Exception:
         js = ''
 
-    html = f"""
-    <div style="position:relative;width:100%;height:640px;margin:-40px 0 20px 0;">
-      <style>
-        html,body{{margin:0;padding:0;height:100%;}}
-        .lofi-bg{{position:absolute;inset:0;z-index:0;}}
-        .lofi-overlay{{position:relative;z-index:2;display:flex;align-items:center;justify-content:center;height:100%;pointer-events:none}}
-        .stats-box{{background:rgba(8,12,20,0.45);backdrop-filter:blur(6px);padding:18px 26px;border-radius:12px;border:1px solid rgba(255,255,255,0.04);pointer-events:auto;color:#dfefff}}
-        {css}
-      </style>
-      <canvas id="rain" class="lofi-bg" width="1600" height="640" style="width:100%;height:100%;display:block;border-radius:0;"></canvas>
-      <div class="lofi-overlay">
-        <div class="stats-box">
-          <div style="text-align:center;font-weight:700;font-size:28px;color:#00d4ff">🌧️ KAIZEN</div>
-          <div style="text-align:center;margin:6px 0 12px;color:#dfefff">Start deinen perfekten Tag • Eins nach dem anderen</div>
-          <div style="display:flex;gap:10px;justify-content:center">
-            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
-              <div style="font-size:20px;font-weight:700">{stats['completed']}</div>
-              <div style="font-size:12px;color:#dfefff">Aufgaben erledigt</div>
-            </div>
-            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
-              <div style="font-size:20px;font-weight:700">{stats['total_minutes']}</div>
-              <div style="font-size:12px;color:#dfefff">Minuten investiert</div>
-            </div>
-            <div style="background:rgba(0,212,255,0.08);padding:10px 16px;border-radius:10px;color:#00d4ff">
-              <div style="font-size:20px;font-weight:700">{total_points()}</div>
-              <div style="font-size:12px;color:#dfefff">Punkte gesammelt</div>
-            </div>
-          </div>
-        </div>
-      </div>
-      <script>{js}</script>
-    </div>
-    """
-    components.html(html, height=720, scrolling=False)
-    st.write("")
-    col1, col2, col3 = st.columns([1, 2, 1])
-    with col2:
-        if st.button("🚀 Tag starten", use_container_width=True, key="lofi_start_btn"):
-            st.session_state.page = "Planen"
-            st.rerun()
-    st.write("")
-    st.markdown("---")
-    st.write("💡 **Was dich erwartet:** Brain Dump → Daily Highlight → Micro-Commitment → Tagesfokus")
-
-    # ── Abendreview ─────────────────────────────────────────────
-    today = date.today()
-    conn  = sqlite3.connect(DB_PATH)
-    done_today  = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=? AND done=1", (today.isoformat(),)).fetchone()[0]
-    total_today = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=?", (today.isoformat(),)).fetchone()[0]
-    # Upcoming deadlines within 7 days
+    # ── DB stats ──────────────────────────────────────────────
+    conn = sqlite3.connect(DB_PATH)
+    done_today  = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=? AND done=1",   (today.isoformat(),)).fetchone()[0]
+    total_today = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=?",               (today.isoformat(),)).fetchone()[0]
+    pts_today   = conn.execute("SELECT COALESCE(SUM(points),0) FROM entries WHERE entry_date=? AND done=1", (today.isoformat(),)).fetchone()[0] or 0
     deadline_alerts = conn.execute(
         "SELECT content, deadline FROM entries WHERE done=0 AND deadline IS NOT NULL "
-        "AND deadline <= date(?, '+7 days') ORDER BY deadline LIMIT 5",
+        "AND deadline != '' AND deadline <= date(?, '+7 days') ORDER BY deadline LIMIT 5",
         (today.isoformat(),)
     ).fetchall()
     conn.close()
 
+    pct_today = int(done_today / total_today * 100) if total_today > 0 else 0
+
+    # ── Weather (wttr.in, no API key) ─────────────────────────
+    weather_html = ""
+    try:
+        wr = _req.get("https://wttr.in/?format=j1", timeout=3)
+        if wr.status_code == 200:
+            wd = wr.json()
+            cur = wd['current_condition'][0]
+            temp_c   = cur['temp_C']
+            feels_c  = cur['FeelsLikeC']
+            desc     = cur['weatherDesc'][0]['value']
+            humidity = cur['humidity']
+            wcode    = int(cur['weatherCode'])
+            if   wcode == 113:                        wemoji = "☀️"
+            elif wcode == 116:                        wemoji = "⛅"
+            elif wcode in [119, 122]:                 wemoji = "☁️"
+            elif wcode in [143, 248, 260]:            wemoji = "🌫️"
+            elif wcode in [200, 386, 389, 392, 395]:  wemoji = "⛈️"
+            elif wcode in [227, 230]:                 wemoji = "❄️"
+            elif wcode in [176, 179, 182, 185, 263, 266, 281, 284,
+                           293, 296, 299, 302, 305, 308]: wemoji = "🌧️"
+            elif wcode in [311, 314, 317, 320, 323, 326, 329, 332,
+                           335, 338, 350, 353, 356, 359, 362, 365,
+                           368, 371, 374, 377]:       wemoji = "🌨️"
+            else:                                     wemoji = "🌡️"
+            weather_html = f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:14px;padding:16px;
+            border:1px solid rgba(255,255,255,0.08);height:100%">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:10px">🌍 Wetter</div>
+  <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+    <div style="font-size:42px;line-height:1">{wemoji}</div>
+    <div>
+      <div style="font-size:30px;font-weight:900;color:white;line-height:1">{temp_c}°C</div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:2px">
+        Gefühlt {feels_c}°</div>
+    </div>
+  </div>
+  <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:6px">{desc}</div>
+  <div style="font-size:10px;color:rgba(255,255,255,0.35)">💧 {humidity}% Luftfeuchtigkeit</div>
+</div>"""
+    except Exception:
+        weather_html = """
+<div style="background:rgba(255,255,255,0.05);border-radius:14px;padding:16px;
+            border:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:10px">🌍 Wetter</div>
+  <div style="font-size:32px;margin-bottom:6px">🌐</div>
+  <div style="font-size:12px;color:rgba(255,255,255,0.3)">Nicht verfügbar</div>
+</div>"""
+
+    # ── Stats card ────────────────────────────────────────────
+    bar_col = "#e74c3c" if pct_today < 30 else "#f39c12" if pct_today < 65 else "#2ecc71"
+    stats_html = f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:14px;padding:16px;
+            border:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:12px">
+    📊 Heute · {today.strftime('%d.%m.%Y')}</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px">
+    <div style="text-align:center;background:rgba(0,212,255,0.08);border-radius:10px;padding:10px 4px">
+      <div style="font-size:24px;font-weight:900;color:#00d4ff">{done_today}</div>
+      <div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px">Erledigt</div>
+    </div>
+    <div style="text-align:center;background:rgba(255,215,0,0.08);border-radius:10px;padding:10px 4px">
+      <div style="font-size:24px;font-weight:900;color:#ffd700">{pts_today}</div>
+      <div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px">Punkte</div>
+    </div>
+    <div style="text-align:center;background:rgba(162,155,254,0.1);border-radius:10px;padding:10px 4px">
+      <div style="font-size:24px;font-weight:900;color:#a29bfe">{total_today - done_today}</div>
+      <div style="font-size:9px;color:rgba(255,255,255,0.45);margin-top:2px">Offen</div>
+    </div>
+  </div>
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);margin-bottom:5px">
+    Fortschritt {pct_today}%</div>
+  <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:5px;overflow:hidden">
+    <div style="width:{pct_today}%;height:100%;background:{bar_col};border-radius:4px"></div>
+  </div>
+  <div style="margin-top:10px;display:flex;justify-content:space-between;
+              font-size:9px;color:rgba(255,255,255,0.25)">
+    <span>🏆 {stats['completed']} Aufgaben total</span>
+    <span>⏱️ {stats['total_minutes']} Min</span>
+  </div>
+</div>"""
+
+    # ── Deadlines card ────────────────────────────────────────
+    dl_items = ""
+    for content, dl in deadline_alerts:
+        if not dl or not dl.strip():
+            continue
+        try:
+            days_left = (date.fromisoformat(dl.strip()) - today).days
+        except ValueError:
+            continue
+        d_col   = "#e74c3c" if days_left <= 1 else "#f39c12" if days_left <= 3 else "#00d4ff"
+        d_label = "Heute!" if days_left == 0 else "Morgen" if days_left == 1 else f"in {days_left}d"
+        dl_items += f"""
+<div style="padding:7px 10px;margin:4px 0;background:rgba(255,255,255,0.04);
+            border-left:3px solid {d_col};border-radius:0 8px 8px 0">
+  <div style="font-size:12px;color:white;white-space:nowrap;overflow:hidden;
+              text-overflow:ellipsis">{content}</div>
+  <div style="font-size:10px;color:{d_col};margin-top:2px">⏰ {dl} · {d_label}</div>
+</div>"""
+
+    if dl_items:
+        deadlines_html = f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:14px;padding:16px;
+            border:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:10px">⚠️ Anstehende Deadlines</div>
+  {dl_items}
+</div>"""
+    else:
+        deadlines_html = """
+<div style="background:rgba(255,255,255,0.05);border-radius:14px;padding:16px;
+            border:1px solid rgba(255,255,255,0.08)">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:10px">⚠️ Deadlines</div>
+  <div style="font-size:12px;color:rgba(255,255,255,0.25);text-align:center;padding:20px 0">
+    ✅ Keine Deadlines in den<br>nächsten 7 Tagen</div>
+</div>"""
+
+    # ── Hero Canvas ───────────────────────────────────────────
+    html_hero = f"""<!DOCTYPE html>
+<html><head><style>
+  html,body{{margin:0;padding:0;height:100%;background:#0e1117;overflow:hidden}}
+  canvas{{position:absolute;inset:0;width:100%;height:100%}}
+  .overlay{{position:absolute;inset:0;display:flex;flex-direction:column;
+             align-items:center;justify-content:center;pointer-events:none;
+             font-family:system-ui,-apple-system,sans-serif}}
+  .greeting{{font-size:12px;letter-spacing:4px;text-transform:uppercase;
+              color:rgba(255,255,255,0.35);margin-bottom:10px}}
+  .clock{{font-size:58px;font-weight:900;color:white;letter-spacing:2px;line-height:1;
+           text-shadow:0 0 40px rgba(0,212,255,0.6);margin-bottom:8px}}
+  .datestr{{font-size:14px;color:rgba(255,255,255,0.45);letter-spacing:1px}}
+  .tagline{{margin-top:18px;font-size:12px;
+             background:linear-gradient(90deg,#00d4ff,#a29bfe);
+             -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+             letter-spacing:1px}}
+  {css}
+</style></head><body>
+<canvas id="rain" width="1200" height="340"></canvas>
+<div class="overlay">
+  <div class="greeting" id="greeting">–</div>
+  <div class="clock"    id="clock">00:00</div>
+  <div class="datestr"  id="datestr">–</div>
+  <div class="tagline">Eins nach dem anderen · jeden Tag ein bisschen besser</div>
+</div>
+<script>
+{js}
+var DAYS=['Sonntag','Montag','Dienstag','Mittwoch','Donnerstag','Freitag','Samstag'];
+var MONTHS=['Januar','Februar','März','April','Mai','Juni','Juli','August','September','Oktober','November','Dezember'];
+function tick(){{
+  var n=new Date();
+  var h=String(n.getHours()).padStart(2,'0');
+  var m=String(n.getMinutes()).padStart(2,'0');
+  document.getElementById('clock').textContent=h+':'+m;
+  document.getElementById('datestr').textContent=
+    DAYS[n.getDay()]+', '+n.getDate()+'. '+MONTHS[n.getMonth()]+' '+n.getFullYear();
+  var hr=n.getHours();
+  document.getElementById('greeting').textContent=
+    hr<12?'Guten Morgen':hr<17?'Guten Tag':'Guten Abend';
+}}
+tick();setInterval(tick,1000);
+</script>
+</body></html>"""
+
+    components.html(html_hero, height=340, scrolling=False)
+
+    # ── CTA ───────────────────────────────────────────────────
+    st.write("")
+    _bc1, _bc2, _bc3 = st.columns([1, 2, 1])
+    with _bc2:
+        if st.button("🚀 Tag starten", use_container_width=True, key="lofi_start_btn", type="primary"):
+            st.session_state.page = "Planen"
+            st.rerun()
+    st.write("")
+
+    # ── Dashboard Row ─────────────────────────────────────────
+    _d1, _d2, _d3 = st.columns(3)
+    with _d1:
+        st.markdown(stats_html, unsafe_allow_html=True)
+    with _d2:
+        st.markdown(deadlines_html, unsafe_allow_html=True)
+    with _d3:
+        st.markdown(weather_html, unsafe_allow_html=True)
+
+    st.write("")
+
+    # ── KI Schnellfrage ───────────────────────────────────────
+    api_k = get_setting('nvidia_api_key', '')
+    if api_k:
+        st.markdown("### 🤖 KI Schnellfrage")
+        _ki_q = st.text_input(
+            "Frage", placeholder="Frag deinen KI-Coach... z.B. Wie priorisiere ich heute?",
+            key="start_ki_question", label_visibility="collapsed"
+        )
+        if _ki_q and _ki_q != st.session_state.get('_last_ki_q', ''):
+            st.session_state['_last_ki_q'] = _ki_q
+            with st.spinner("KI denkt nach..."):
+                try:
+                    from openai import OpenAI as _OAI
+                    _cli = _OAI(base_url="https://integrate.api.nvidia.com/v1", api_key=api_k)
+                    _resp = _cli.chat.completions.create(
+                        model="moonshotai/kimi-k2.6",
+                        messages=[
+                            {"role": "system", "content": "Du bist ein präziser Produktivitäts-Coach. Antworte auf Deutsch in 2-4 Sätzen, klar und direkt. Kein Fülltext."},
+                            {"role": "user", "content": _ki_q}
+                        ],
+                        max_tokens=350, temperature=0.7
+                    )
+                    st.session_state['_last_ki_answer'] = _resp.choices[0].message.content
+                except Exception as _e:
+                    st.session_state['_last_ki_answer'] = f"Fehler: {_e}"
+
+        if st.session_state.get('_last_ki_answer') and st.session_state.get('_last_ki_q') == _ki_q and _ki_q:
+            st.markdown(f"""
+<div style="background:rgba(0,212,255,0.06);border-radius:12px;padding:14px 16px;
+            border-left:3px solid #00d4ff;margin-top:8px">
+  <div style="font-size:9px;color:#00d4ff;letter-spacing:2px;
+              text-transform:uppercase;margin-bottom:8px">KI Coach</div>
+  <div style="font-size:14px;color:rgba(255,255,255,0.85);line-height:1.6">
+    {st.session_state['_last_ki_answer']}</div>
+</div>""", unsafe_allow_html=True)
+        st.write("")
+
+    # ── Evening Review ────────────────────────────────────────
     if total_today > 0:
-        st.markdown("---")
-        st.markdown("### 🌙 Tagesrückblick")
-        dc1, dc2, dc3 = st.columns(3)
-        dc1.metric("Heute erledigt", f"{done_today}/{total_today}")
-        dc2.metric("Quote", f"{int(done_today/total_today*100)}%")
-        dc3.metric("Offen", total_today - done_today)
+        with st.expander(f"🌙 Tagesrückblick · {done_today}/{total_today} erledigt · {pct_today}%"):
+            _er1, _er2, _er3 = st.columns(3)
+            _er1.metric("Erledigt", f"{done_today}/{total_today}")
+            _er2.metric("Quote",    f"{pct_today}%")
+            _er3.metric("Offen",    total_today - done_today)
 
-        if deadline_alerts:
-            st.markdown("**⚠️ Anstehende Deadlines:**")
-            for content, dl in deadline_alerts:
-                days_left = (date.fromisoformat(dl) - today).days
-                color = "#e74c3c" if days_left <= 1 else "#f39c12" if days_left <= 3 else "#00d4ff"
-                st.markdown(
-                    f'<div style="padding:6px 10px;margin:3px 0;background:rgba(255,255,255,.05);'
-                    f'border-left:3px solid {color};border-radius:4px;font-size:13px">'
-                    f'<strong>{content}</strong> — '
-                    f'<span style="color:{color}">{dl} ({days_left}d)</span></div>',
-                    unsafe_allow_html=True
-                )
-
-        api_k = get_setting('nvidia_api_key', '')
-        if api_k:
-            er_col, _ = st.columns([1, 2])
-            with er_col:
-                if st.button("🤖 KI-Abendreview", key="start_evening_review", use_container_width=True):
+            if api_k:
+                if st.button("🤖 KI-Abendreview generieren", key="start_evening_review",
+                             use_container_width=True):
                     with st.spinner("KI analysiert deinen Tag..."):
                         review = ki_evening_review(api_k)
                     st.session_state['evening_review'] = review
                     st.rerun()
 
-            if 'evening_review' in st.session_state:
-                rv = st.session_state['evening_review']
-                if 'error' in rv:
-                    st.error(f"Fehler: {rv['error']}")
-                else:
-                    st.markdown(f"#### {rv.get('headline', 'Tagesrückblick')}")
-                    wins = rv.get('wins', [])
-                    if wins:
-                        st.markdown("**🏆 Wins:**")
-                        for w in wins:
-                            st.markdown(f"- {w}")
-                    if rv.get('open_note'):
-                        st.info(f"📝 {rv['open_note']}")
-                    alerts = rv.get('upcoming_alerts', [])
-                    if alerts:
-                        st.markdown("**⏰ Wichtiges morgen:**")
-                        for a in alerts:
-                            st.warning(a)
-                    if rv.get('optimization_tip'):
-                        st.markdown(f"**💡 Tipp für morgen:** {rv['optimization_tip']}")
-                    if rv.get('tomorrow_focus'):
-                        st.success(f"🎯 Morgen wichtigste Aufgabe: **{rv['tomorrow_focus']}**")
-                    if rv.get('motivation'):
-                        st.markdown(f"*{rv['motivation']}*")
-                    if st.button("✕ Schließen", key="close_review"):
-                        del st.session_state['evening_review']
-                        st.rerun()
+                if 'evening_review' in st.session_state:
+                    rv = st.session_state['evening_review']
+                    if 'error' in rv:
+                        st.error(f"Fehler: {rv['error']}")
+                    else:
+                        st.markdown(f"#### {rv.get('headline', 'Tagesrückblick')}")
+                        wins = rv.get('wins', [])
+                        if wins:
+                            st.markdown("**🏆 Wins:**")
+                            for w in wins:
+                                st.markdown(f"- {w}")
+                        if rv.get('open_note'):
+                            st.info(f"📝 {rv['open_note']}")
+                        for _a in rv.get('upcoming_alerts', []):
+                            st.warning(_a)
+                        if rv.get('optimization_tip'):
+                            st.markdown(f"**💡 Tipp für morgen:** {rv['optimization_tip']}")
+                        if rv.get('tomorrow_focus'):
+                            st.success(f"🎯 Morgen: **{rv['tomorrow_focus']}**")
+                        if rv.get('motivation'):
+                            st.markdown(f"*{rv['motivation']}*")
+                        if st.button("✕ Schließen", key="close_review"):
+                            del st.session_state['evening_review']
+                            st.rerun()
 
 
 def render_start_page():
