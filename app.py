@@ -59,6 +59,32 @@ def init_db():
     )
     ''')
     c.execute('''
+    CREATE TABLE IF NOT EXISTS projects (
+        id INTEGER PRIMARY KEY,
+        name TEXT,
+        description TEXT,
+        deadline TEXT,
+        color TEXT DEFAULT '#60a5fa',
+        active INTEGER DEFAULT 1,
+        created_at TEXT,
+        daily_minutes INTEGER DEFAULT 60
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS project_tasks (
+        id INTEGER PRIMARY KEY,
+        project_id INTEGER,
+        content TEXT,
+        estimate_minutes INTEGER DEFAULT 30,
+        priority INTEGER DEFAULT 5,
+        done INTEGER DEFAULT 0,
+        completed_at TEXT,
+        scheduled_date TEXT,
+        order_index INTEGER DEFAULT 0,
+        created_at TEXT
+    )
+    ''')
+    c.execute('''
     CREATE TABLE IF NOT EXISTS recurring_tasks (
         id INTEGER PRIMARY KEY,
         entry_type TEXT DEFAULT 'brain',
@@ -306,6 +332,152 @@ def delete_all_data():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM entries')
+    conn.commit()
+    conn.close()
+
+
+# ========== PROJECTS ==========
+
+PROJECT_COLORS = ["#60a5fa", "#f97316", "#4ade80", "#a78bfa", "#f43f5e", "#fbbf24", "#22d3ee"]
+
+
+def get_projects():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, name, description, deadline, color, active, created_at, daily_minutes FROM projects ORDER BY created_at DESC')
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def add_project(name, description, deadline, color, daily_minutes):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT INTO projects (name, description, deadline, color, active, created_at, daily_minutes) VALUES (?,?,?,?,1,?,?)',
+              (name, description, deadline, color, now, daily_minutes))
+    pid = c.lastrowid
+    conn.commit()
+    conn.close()
+    return pid
+
+
+def delete_project(project_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM project_tasks WHERE project_id=?', (project_id,))
+    c.execute('DELETE FROM projects WHERE id=?', (project_id,))
+    conn.commit()
+    conn.close()
+
+
+def get_project_tasks(project_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT id, project_id, content, estimate_minutes, priority, done,
+                        completed_at, scheduled_date, order_index
+                 FROM project_tasks WHERE project_id=? ORDER BY order_index, id''', (project_id,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def add_project_task(project_id, content, estimate, priority=5):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT COALESCE(MAX(order_index),0) FROM project_tasks WHERE project_id=?', (project_id,))
+    max_order = c.fetchone()[0]
+    c.execute('''INSERT INTO project_tasks (project_id, content, estimate_minutes, priority, done, order_index, created_at)
+                 VALUES (?,?,?,?,0,?,?)''', (project_id, content, estimate, priority, max_order + 1, now))
+    conn.commit()
+    conn.close()
+
+
+def toggle_project_task_done(task_id, new_val):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    if new_val:
+        c.execute('UPDATE project_tasks SET done=1, completed_at=? WHERE id=?', (now, task_id))
+    else:
+        c.execute('UPDATE project_tasks SET done=0, completed_at=NULL WHERE id=?', (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def delete_project_task(task_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM project_tasks WHERE id=?', (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def schedule_project_tasks(project_id):
+    """Distribute undone tasks across days from today to deadline with 10% buffer."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT deadline, daily_minutes FROM projects WHERE id=?', (project_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return
+    deadline_str, daily_mins = row
+    daily_mins = max(daily_mins or 60, 15)
+    try:
+        deadline = date.fromisoformat(deadline_str)
+    except Exception:
+        conn.close()
+        return
+
+    today = date.today()
+    days_total = max((deadline - today).days, 1)
+    buffer_days = max(1, int(days_total * 0.10))
+    end_date = deadline - timedelta(days=buffer_days)
+    if end_date < today:
+        end_date = deadline
+
+    c.execute('''SELECT id, estimate_minutes FROM project_tasks
+                 WHERE project_id=? AND done=0 ORDER BY priority DESC, order_index''', (project_id,))
+    tasks = c.fetchall()
+
+    current = today
+    budget = daily_mins
+    for task_id, estimate in tasks:
+        estimate = max(estimate or 30, 5)
+        # advance day if budget exhausted
+        while budget < min(estimate, daily_mins) and current <= end_date:
+            current += timedelta(days=1)
+            budget = daily_mins
+        target = min(current, end_date)
+        c.execute('UPDATE project_tasks SET scheduled_date=? WHERE id=?', (target.isoformat(), task_id))
+        budget -= estimate
+        if budget <= 0:
+            current += timedelta(days=1)
+            budget = daily_mins
+
+    conn.commit()
+    conn.close()
+
+
+def sync_project_tasks():
+    """Auto-add today's scheduled project tasks to entries (once per day)."""
+    today_str = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''SELECT pt.id, pt.content, pt.estimate_minutes, p.name
+                 FROM project_tasks pt JOIN projects p ON pt.project_id=p.id
+                 WHERE pt.scheduled_date=? AND pt.done=0 AND p.active=1''', (today_str,))
+    tasks = c.fetchall()
+    for task_id, content, estimate, project_name in tasks:
+        c.execute('SELECT COUNT(*) FROM entries WHERE entry_date=? AND content=? AND tags LIKE ?',
+                  (today_str, content, f'%projekt%'))
+        if c.fetchone()[0] == 0:
+            now = datetime.utcnow().isoformat()
+            c.execute('''INSERT INTO entries (entry_type, content, tags, estimate_minutes, points, created_at, entry_date, last_modified)
+                         VALUES (?,?,?,?,0,?,?,?)''',
+                      ('brain', content, f'projekt,{project_name}', estimate or 30, now, today_str, now))
     conn.commit()
     conn.close()
 
@@ -851,6 +1023,298 @@ def _render_entry_card(r):
                 st.rerun()
 
 
+def render_projekte_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+
+    if st.session_state.get('selected_project'):
+        _render_project_detail(st.session_state.selected_project)
+        return
+
+    st.title("Projekte")
+    st.caption("Große Ziele — automatisch auf tägliche Aufgaben runtergebrochen.")
+
+    with st.expander("➕ Neues Projekt erstellen", expanded=False):
+        with st.form("new_project_form"):
+            name = st.text_input("Projektname", placeholder="z.B. Video Kurs Trading & Risikomanagement")
+            description = st.text_area("Beschreibung (optional)", height=60)
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                deadline = st.date_input("Deadline", value=date.today() + timedelta(days=30))
+            with col2:
+                daily_minutes = st.number_input("Arbeitszeit/Tag (Min)", min_value=15, step=15, value=60)
+            with col3:
+                color = st.color_picker("Projektfarbe", value="#60a5fa")
+            if st.form_submit_button("Projekt anlegen", use_container_width=True):
+                if name.strip():
+                    pid = add_project(name.strip(), description.strip(), deadline.isoformat(), color, daily_minutes)
+                    st.session_state.selected_project = pid
+                    st.rerun()
+
+    st.markdown("---")
+    projects = get_projects()
+    if not projects:
+        st.info("Noch keine Projekte — erstelle dein erstes Projekt oben.")
+        return
+
+    for proj in projects:
+        pid, name, description, deadline, color, active, created_at, daily_minutes = proj
+        tasks = get_project_tasks(pid)
+        total = len(tasks)
+        done_c = sum(1 for t in tasks if t[5])
+        pct = done_c / total if total > 0 else 0
+        next_task = next((t for t in tasks if not t[5]), None)
+        _, _, urg_label, _ = get_urgency(deadline)
+
+        st.markdown(
+            f'<div style="border-left:5px solid {color};background:rgba(0,0,0,0.15);'
+            f'border-radius:10px;padding:16px 20px;margin-bottom:4px">'
+            f'<strong style="font-size:18px">{name}</strong>'
+            + (f'<span class="dl-badge">{urg_label}</span>' if urg_label else
+               f'<span class="dl-badge">📅 {deadline}</span>' if deadline else "")
+            + f'<span class="dl-badge">⏱️ {daily_minutes} min/Tag</span>'
+            + f'<br><small style="opacity:.65">{done_c}/{total} Aufgaben · {int(pct*100)}% erledigt</small>'
+            + (f'<br><small style="opacity:.65">➡️ Als nächstes: <em>{next_task[2]}</em></small>' if next_task else
+               '<br><small style="color:#4ade80">✅ Alle Aufgaben erledigt!</small>' if total > 0 else "")
+            + '</div>', unsafe_allow_html=True
+        )
+        st.progress(pct)
+        c1, c2, c3, _ = st.columns([0.16, 0.18, 0.12, 0.54])
+        with c1:
+            if st.button("Öffnen →", key=f"proj_open_{pid}", use_container_width=True):
+                st.session_state.selected_project = pid
+                st.rerun()
+        with c2:
+            if st.button("🔄 Einplanen", key=f"proj_sched_{pid}", use_container_width=True):
+                schedule_project_tasks(pid)
+                st.success("Neu eingeplant!")
+                st.rerun()
+        with c3:
+            if st.button("🗑️", key=f"proj_del_{pid}"):
+                delete_project(pid)
+                st.rerun()
+        st.markdown("")
+
+
+def _render_project_detail(project_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, name, description, deadline, color, active, created_at, daily_minutes FROM projects WHERE id=?', (project_id,))
+    proj = c.fetchone()
+    conn.close()
+    if not proj:
+        st.session_state.selected_project = None
+        st.rerun()
+        return
+
+    pid, name, description, deadline, color, active, created_at, daily_minutes = proj
+
+    if st.button("← Alle Projekte", key="proj_back"):
+        st.session_state.selected_project = None
+        st.rerun()
+
+    tasks = get_project_tasks(pid)
+    total = len(tasks)
+    done_count = sum(1 for t in tasks if t[5])
+    total_mins = sum(t[3] or 0 for t in tasks)
+    done_mins  = sum(t[3] or 0 for t in tasks if t[5])
+    pct = done_count / total if total > 0 else 0
+
+    try:
+        days_left = (date.fromisoformat(deadline) - date.today()).days
+    except Exception:
+        days_left = None
+
+    st.markdown(f'<h2 style="color:{color};margin-bottom:4px">{name}</h2>', unsafe_allow_html=True)
+    if description:
+        st.caption(description)
+
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("Aufgaben", f"{done_count} / {total}")
+    mc2.metric("Fortschritt", f"{int(pct*100)} %")
+    mc3.metric("Zeit erledigt", f"{done_mins} min")
+    if days_left is not None:
+        mc4.metric("Tage bis Deadline", days_left)
+
+    st.progress(pct)
+
+    if days_left is not None:
+        undone = [t for t in tasks if not t[5]]
+        if undone:
+            remaining_mins = sum(t[3] or 0 for t in undone)
+            if days_left > 0:
+                needed = remaining_mins / days_left
+                if days_left < 0:
+                    st.error(f"⚠️ Deadline überschritten! Noch {remaining_mins} min Arbeit offen.")
+                elif days_left <= 3:
+                    st.warning(f"⏰ Nur noch {days_left} Tage! Ca. {int(needed)} min/Tag nötig.")
+                else:
+                    st.info(f"📊 {remaining_mins} min offen · ca. {int(needed)} min/Tag nötig · {daily_minutes} min/Tag geplant")
+
+    st.markdown("---")
+
+    col1, col2, _ = st.columns([0.28, 0.28, 0.44])
+    with col1:
+        if st.button("🔄 Aufgaben neu einplanen", use_container_width=True):
+            schedule_project_tasks(pid)
+            st.success("Neu eingeplant!")
+            st.rerun()
+    with col2:
+        if st.button("⚙️ Projekteinstellungen", use_container_width=True, key="proj_settings_btn"):
+            st.session_state[f'proj_settings_{pid}'] = not st.session_state.get(f'proj_settings_{pid}', False)
+            st.rerun()
+
+    if st.session_state.get(f'proj_settings_{pid}'):
+        with st.form("edit_project_form"):
+            new_name = st.text_input("Name", value=name)
+            new_desc = st.text_area("Beschreibung", value=description or "", height=60)
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                new_deadline = st.date_input("Deadline", value=date.fromisoformat(deadline) if deadline else date.today())
+            with c2:
+                new_daily = st.number_input("Min/Tag", min_value=15, step=15, value=daily_minutes or 60)
+            with c3:
+                new_color = st.color_picker("Farbe", value=color or "#60a5fa")
+            if st.form_submit_button("Speichern"):
+                conn2 = sqlite3.connect(DB_PATH)
+                c2 = conn2.cursor()
+                c2.execute('UPDATE projects SET name=?, description=?, deadline=?, daily_minutes=?, color=? WHERE id=?',
+                           (new_name, new_desc, new_deadline.isoformat(), new_daily, new_color, pid))
+                conn2.commit()
+                conn2.close()
+                st.session_state[f'proj_settings_{pid}'] = False
+                st.rerun()
+
+    # Add task form
+    with st.expander("➕ Aufgabe hinzufügen"):
+        with st.form("add_task_form"):
+            task_content = st.text_input("Aufgabe", placeholder="Was muss gemacht werden?")
+            col1, col2 = st.columns(2)
+            with col1:
+                task_estimate = st.number_input("Minuten", min_value=5, step=5, value=30)
+            with col2:
+                task_priority = st.slider("Priorität", min_value=0, max_value=10, value=5)
+            if st.form_submit_button("Aufgabe hinzufügen", use_container_width=True):
+                if task_content.strip():
+                    add_project_task(pid, task_content.strip(), task_estimate, task_priority)
+                    schedule_project_tasks(pid)
+                    st.rerun()
+
+    st.markdown("---")
+
+    # ── Task list ─────────────────────────────────────────────────────────────
+    undone_tasks = [t for t in tasks if not t[5]]
+    done_tasks   = [t for t in tasks if t[5]]
+    today_str    = date.today().isoformat()
+
+    if undone_tasks:
+        st.subheader(f"📋 Offen ({len(undone_tasks)})")
+        for t in undone_tasks:
+            task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx = t
+            is_today = scheduled_date == today_str
+            card_style = (
+                f"border-left:4px solid #ffd700;background:rgba(255,215,0,0.07);" if is_today else
+                f"border-left:4px solid {color};background:rgba(0,0,0,0.12);"
+            )
+            st.markdown(
+                f'<div style="{card_style}border-radius:8px;padding:10px 14px;margin-bottom:6px">'
+                f'<strong>{content}</strong>'
+                + (f'<span class="dl-badge" style="color:#ffd700">📅 Heute</span>' if is_today else
+                   f'<span class="dl-badge">{scheduled_date}</span>' if scheduled_date else "")
+                + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else "")
+                + (f'<span class="dl-badge">★ {priority}</span>' if priority else "")
+                + '</div>', unsafe_allow_html=True
+            )
+            c1, c2, _ = st.columns([0.10, 0.12, 0.78])
+            with c1:
+                if st.checkbox("", value=False, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
+                    toggle_project_task_done(task_id, True)
+                    st.rerun()
+            with c2:
+                if st.button("🗑️", key=f"pt_del_{task_id}"):
+                    delete_project_task(task_id)
+                    st.rerun()
+
+    if done_tasks:
+        with st.expander(f"✅ Erledigt ({len(done_tasks)})"):
+            for t in done_tasks:
+                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx = t
+                st.markdown(f'<div style="opacity:.4;text-decoration:line-through;padding:4px 0">{content}'
+                            + (f' <small>({estimate} min)</small>' if estimate else '') + '</div>',
+                            unsafe_allow_html=True)
+                c1, _ = st.columns([0.10, 0.90])
+                with c1:
+                    if not st.checkbox("", value=True, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
+                        toggle_project_task_done(task_id, False)
+                        st.rerun()
+
+    # ── Visualizations ────────────────────────────────────────────────────────
+    if tasks:
+        st.markdown("---")
+        st.subheader("📊 Zeitplan & Fortschritt")
+
+        tab1, tab2 = st.tabs(["Gantt-Zeitplan", "Burndown"])
+
+        with tab1:
+            gantt_data = []
+            for t in tasks:
+                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, _ = t
+                if scheduled_date:
+                    try:
+                        start_dt = datetime.combine(date.fromisoformat(scheduled_date),
+                                                     datetime.min.time())
+                        end_dt = start_dt + timedelta(minutes=max(estimate or 30, 15))
+                        gantt_data.append({
+                            'Aufgabe': (content[:35] + '…') if len(content) > 35 else content,
+                            'Start': start_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                            'Ende':  end_dt.strftime('%Y-%m-%d %H:%M:%S'),
+                            'Status': 'Erledigt' if done else 'Offen',
+                        })
+                    except Exception:
+                        pass
+            if gantt_data:
+                df_g = pd.DataFrame(gantt_data)
+                fig_g = px.timeline(df_g, x_start='Start', x_end='Ende', y='Aufgabe',
+                                     color='Status',
+                                     color_discrete_map={'Erledigt': '#4ade80', 'Offen': color},
+                                     template='plotly_dark')
+                fig_g.update_yaxes(autorange="reversed")
+                fig_g.add_vline(x=datetime.combine(date.today(), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                                 line_dash="dash", line_color="#ffd700",
+                                 annotation_text="Heute", annotation_font_color="#ffd700")
+                if deadline:
+                    fig_g.add_vline(x=datetime.combine(date.fromisoformat(deadline), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                                     line_dash="dot", line_color="#ef4444",
+                                     annotation_text="Deadline", annotation_font_color="#ef4444")
+                st.plotly_chart(fig_g, use_container_width=True)
+            else:
+                st.info("Plane Aufgaben ein um den Zeitplan zu sehen.")
+
+        with tab2:
+            if done_tasks:
+                from collections import Counter
+                done_dates = [t[6][:10] for t in done_tasks if t[6]]
+                if done_dates:
+                    counts = Counter(done_dates)
+                    df_b = pd.DataFrame(sorted(counts.items()), columns=['Datum', 'Neu_erledigt'])
+                    df_b['Kumulativ'] = df_b['Neu_erledigt'].cumsum()
+
+                    fig_b = go.Figure()
+                    fig_b.add_trace(go.Scatter(
+                        x=df_b['Datum'], y=df_b['Kumulativ'],
+                        mode='lines+markers', name='Erledigt',
+                        line=dict(color='#4ade80', width=3),
+                        fill='tozeroy', fillcolor='rgba(74,222,128,0.08)'
+                    ))
+                    fig_b.add_hline(y=total, line_dash="dash", line_color="#60a5fa",
+                                     annotation_text=f"Gesamt: {total} Aufgaben",
+                                     annotation_font_color="#60a5fa")
+                    fig_b.update_layout(template='plotly_dark', showlegend=False,
+                                         yaxis_title="Aufgaben erledigt")
+                    st.plotly_chart(fig_b, use_container_width=True)
+            else:
+                st.info("Erledige Aufgaben um den Fortschritt zu sehen.")
+
+
 def render_routinen_page():
     st.markdown(URGENCY_CSS, unsafe_allow_html=True)
     st.title("Routinen")
@@ -1003,8 +1467,12 @@ def main():
         st.session_state.page = 'Start'
 
     sync_recurring_tasks()
+    sync_project_tasks()
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Alle Einträge", "Routinen", "Statistiken"]
+    if 'selected_project' not in st.session_state:
+        st.session_state.selected_project = None
+
+    PAGES = ["Start", "Planen", "Tagesfokus", "Projekte", "Alle Einträge", "Routinen", "Statistiken"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -1019,6 +1487,8 @@ def main():
         render_planen_page()
     elif page == "Tagesfokus":
         render_tagesfokus_page()
+    elif page == "Projekte":
+        render_projekte_page()
     elif page == "Alle Einträge":
         render_alle_eintraege_page()
     elif page == "Routinen":
