@@ -316,6 +316,13 @@ def init_db():
                 c.execute(f'ALTER TABLE entries ADD COLUMN {col} {typedef}')
             except Exception:
                 pass
+    c.execute("PRAGMA table_info(project_tasks)")
+    pt_cols = [r[1] for r in c.fetchall()]
+    if 'notes' not in pt_cols:
+        try:
+            c.execute("ALTER TABLE project_tasks ADD COLUMN notes TEXT DEFAULT ''")
+        except Exception:
+            pass
     c.execute('''
     CREATE TABLE IF NOT EXISTS task_categories (
         id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -368,7 +375,8 @@ def init_db():
         completed_at TEXT,
         scheduled_date TEXT,
         order_index INTEGER DEFAULT 0,
-        created_at TEXT
+        created_at TEXT,
+        notes TEXT DEFAULT ''
     )
     ''')
     c.execute('''
@@ -1395,7 +1403,7 @@ def get_project_tasks(project_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT id, project_id, content, estimate_minutes, priority, done,
-                        completed_at, scheduled_date, order_index
+                        completed_at, scheduled_date, order_index, COALESCE(notes,'')
                  FROM project_tasks WHERE project_id=? ORDER BY order_index, id''', (project_id,))
     rows = c.fetchall()
     conn.close()
@@ -1430,6 +1438,48 @@ def delete_project_task(task_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM project_tasks WHERE id=?', (task_id,))
+    conn.commit()
+    conn.close()
+
+
+def move_project_task(task_id, direction, project_id):
+    """Move task up (-1) or down (+1) within its project."""
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    tasks = c.execute(
+        "SELECT id, order_index FROM project_tasks WHERE project_id=? AND done=0 ORDER BY order_index, id",
+        (project_id,)
+    ).fetchall()
+    ids = [r[0] for r in tasks]
+    if task_id not in ids:
+        conn.close()
+        return
+    idx = ids.index(task_id)
+    swap = idx + direction
+    if swap < 0 or swap >= len(ids):
+        conn.close()
+        return
+    # Swap order_index values
+    oi_a = tasks[idx][1]
+    oi_b = tasks[swap][1]
+    if oi_a == oi_b:
+        oi_b = oi_a + 1
+    c.execute("UPDATE project_tasks SET order_index=? WHERE id=?", (oi_b, task_id))
+    c.execute("UPDATE project_tasks SET order_index=? WHERE id=?", (oi_a, ids[swap]))
+    # Normalize order_index to 0,1,2...
+    updated = c.execute(
+        "SELECT id FROM project_tasks WHERE project_id=? AND done=0 ORDER BY order_index, id",
+        (project_id,)
+    ).fetchall()
+    for i, (tid,) in enumerate(updated):
+        c.execute("UPDATE project_tasks SET order_index=? WHERE id=?", (i, tid))
+    conn.commit()
+    conn.close()
+
+
+def update_project_task_notes(task_id, notes):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE project_tasks SET notes=? WHERE id=?", (notes or '', task_id))
     conn.commit()
     conn.close()
 
@@ -4342,36 +4392,70 @@ def _render_project_detail(project_id):
 
     if undone_tasks:
         st.subheader(f"📋 Offen ({len(undone_tasks)})")
-        for t in undone_tasks:
-            task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx = t
-            is_today = scheduled_date == today_str
-            card_style = (
-                f"border-left:4px solid #ffd700;background:rgba(255,215,0,0.07);" if is_today else
-                f"border-left:4px solid {color};background:rgba(0,0,0,0.12);"
-            )
+        for i, t in enumerate(undone_tasks):
+            task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes = t
+            is_today  = scheduled_date == today_str
+            card_bg   = "rgba(255,215,0,0.06)" if is_today else "rgba(255,255,255,0.03)"
+            border_c  = "#ffd700" if is_today else color
+            notes_preview = f'<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:4px;white-space:pre-wrap">{notes[:120]}{"…" if len(notes)>120 else ""}</div>' if notes else ""
+
             st.markdown(
-                f'<div style="{card_style}border-radius:8px;padding:10px 14px;margin-bottom:6px">'
+                f'<div style="border-left:4px solid {border_c};background:{card_bg};'
+                f'border-radius:8px;padding:10px 14px;margin-bottom:2px">'
                 f'<strong>{content}</strong>'
                 + (f'<span class="dl-badge" style="color:#ffd700">📅 Heute</span>' if is_today else
                    f'<span class="dl-badge">{scheduled_date}</span>' if scheduled_date else "")
                 + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else "")
                 + (f'<span class="dl-badge">★ {priority}</span>' if priority else "")
-                + '</div>', unsafe_allow_html=True
+                + notes_preview + '</div>', unsafe_allow_html=True
             )
-            c1, c2, _ = st.columns([0.10, 0.12, 0.78])
-            with c1:
+
+            cc, cup, cdn, cnotes, cdel, _ = st.columns([0.06, 0.07, 0.07, 0.14, 0.07, 0.59])
+            with cc:
                 if st.checkbox("", value=False, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
                     toggle_project_task_done(task_id, True)
                     st.rerun()
-            with c2:
-                if st.button("🗑️", key=f"pt_del_{task_id}"):
+            with cup:
+                if i > 0 and st.button("↑", key=f"pt_up_{task_id}", use_container_width=True):
+                    move_project_task(task_id, -1, pid)
+                    st.rerun()
+            with cdn:
+                if i < len(undone_tasks) - 1 and st.button("↓", key=f"pt_dn_{task_id}", use_container_width=True):
+                    move_project_task(task_id, 1, pid)
+                    st.rerun()
+            with cnotes:
+                note_key = f"show_note_{task_id}"
+                note_lbl = "📝 Notiz" if not notes else "📝 Notiz ●"
+                if st.button(note_lbl, key=f"pt_notebtn_{task_id}", use_container_width=True):
+                    st.session_state[note_key] = not st.session_state.get(note_key, False)
+                    st.rerun()
+            with cdel:
+                if st.button("🗑️", key=f"pt_del_{task_id}", use_container_width=True):
                     delete_project_task(task_id)
                     st.rerun()
+
+            if st.session_state.get(f"show_note_{task_id}"):
+                with st.form(f"note_form_{task_id}"):
+                    new_note = st.text_area("Notizen zur Aufgabe", value=notes or "",
+                                            height=100, placeholder="Gedanken, Links, Zwischenstände...",
+                                            key=f"note_inp_{task_id}")
+                    ns, nc = st.columns(2)
+                    with ns:
+                        if st.form_submit_button("💾 Speichern", use_container_width=True):
+                            update_project_task_notes(task_id, new_note.strip())
+                            st.session_state.pop(f"show_note_{task_id}", None)
+                            st.rerun()
+                    with nc:
+                        if st.form_submit_button("✕ Abbrechen", use_container_width=True):
+                            st.session_state.pop(f"show_note_{task_id}", None)
+                            st.rerun()
+
+            st.markdown('<div style="margin-bottom:4px"></div>', unsafe_allow_html=True)
 
     if done_tasks:
         with st.expander(f"✅ Erledigt ({len(done_tasks)})"):
             for t in done_tasks:
-                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx = t
+                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes = t
                 st.markdown(f'<div style="opacity:.4;text-decoration:line-through;padding:4px 0">{content}'
                             + (f' <small>({estimate} min)</small>' if estimate else '') + '</div>',
                             unsafe_allow_html=True)
