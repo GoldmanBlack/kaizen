@@ -561,7 +561,17 @@ def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0,
     new_id = c.lastrowid
     conn.commit()
     conn.close()
+    _schedule_backup()
     return new_id
+
+
+def _schedule_backup():
+    """Set a flag so the next rerun triggers a backup. Non-blocking."""
+    try:
+        import streamlit as _st
+        _st.session_state['_backup_pending'] = True
+    except Exception:
+        pass
 
 
 def get_categories():
@@ -683,6 +693,7 @@ def toggle_done(entry_id, new, elapsed_seconds=0, points=None):
                   (now, elapsed_seconds, points, now, entry_id))
         conn.commit()
         conn.close()
+        _schedule_backup()
         # Award XP based on task type
         row_e = sqlite3.connect(DB_PATH).execute(
             "SELECT entry_type, estimate_minutes, category_id FROM entries WHERE id=?", (entry_id,)
@@ -1607,6 +1618,91 @@ def gist_create(token, data_dict, description="Kaizen export"):
     return r.status_code, r.json()
 
 
+# ── Auto-Backup / Restore (vollständige SQLite DB via Gist) ─────
+
+def _get_backup_credentials():
+    """Returns (token, gist_id) from Streamlit secrets or DB settings. Both may be None."""
+    token   = None
+    gist_id = None
+    try:
+        import streamlit as _st
+        token   = _st.secrets.get("GITHUB_BACKUP_TOKEN") or _st.secrets.get("github_backup_token")
+        gist_id = _st.secrets.get("GITHUB_BACKUP_GIST_ID") or _st.secrets.get("github_backup_gist_id")
+    except Exception:
+        pass
+    if not token:
+        token = get_setting("backup_github_token", "")
+    if not gist_id:
+        gist_id = get_setting("backup_gist_id", "")
+    return token or None, gist_id or None
+
+
+def auto_backup_db():
+    """Upload full SQLite DB as base64 to Gist. Silent on error."""
+    try:
+        token, gist_id = _get_backup_credentials()
+        if not token:
+            return False
+        import base64
+        with open(DB_PATH, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        payload = json.dumps({"v": 2, "db": b64, "ts": datetime.utcnow().isoformat()})
+        headers = {"Authorization": f"token {token}"}
+        if gist_id:
+            r = requests.patch(
+                f"https://api.github.com/gists/{gist_id}",
+                json={"files": {"kaizen_db_backup.json": {"content": payload}}},
+                headers=headers, timeout=10
+            )
+            if r.status_code in (200, 201):
+                set_setting("last_backup", datetime.utcnow().isoformat())
+                return True
+        else:
+            r = requests.post(
+                "https://api.github.com/gists",
+                json={"files": {"kaizen_db_backup.json": {"content": payload}},
+                      "description": "Kaizen DB auto-backup", "public": False},
+                headers=headers, timeout=10
+            )
+            if r.status_code == 201:
+                new_id = r.json().get("id", "")
+                set_setting("backup_gist_id", new_id)
+                set_setting("last_backup", datetime.utcnow().isoformat())
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def auto_restore_db():
+    """Restore DB from Gist if local DB is empty. Called once at startup."""
+    try:
+        token, gist_id = _get_backup_credentials()
+        if not token or not gist_id:
+            return False
+        import base64
+        r = requests.get(
+            f"https://api.github.com/gists/{gist_id}",
+            headers={"Authorization": f"token {token}"}, timeout=10
+        )
+        if r.status_code != 200:
+            return False
+        files = r.json().get("files", {})
+        backup_file = files.get("kaizen_db_backup.json")
+        if not backup_file:
+            return False
+        raw = backup_file.get("content", "")
+        data = json.loads(raw)
+        if data.get("v") != 2 or not data.get("db"):
+            return False
+        db_bytes = base64.b64decode(data["db"])
+        with open(DB_PATH, "wb") as f:
+            f.write(db_bytes)
+        return True
+    except Exception:
+        return False
+
+
 # ========== KI COACH ==========
 
 def build_ai_context(days_back=0):
@@ -2157,8 +2253,8 @@ def _build_tagesfokus_hero(done_count, total, pts_today, today_label):
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-body{{background:transparent;font-family:-apple-system,sans-serif;overflow:hidden}}
-.hero{{display:flex;align-items:center;justify-content:center;gap:40px;padding:10px 20px}}
+html,body{{background:transparent;font-family:-apple-system,sans-serif;overflow:hidden;height:100%;margin:0;padding:0}}
+.hero{{display:flex;align-items:center;justify-content:center;gap:40px;padding:16px 28px;min-height:260px}}
 .ring-wrap{{position:relative;width:200px;height:200px;flex-shrink:0}}
 svg.ring{{width:200px;height:200px;transform:rotate(-90deg)}}
 .ring-track{{fill:none;stroke:rgba(255,255,255,0.06);stroke-width:14;stroke-linecap:round}}
@@ -3596,7 +3692,7 @@ def render_tagesfokus_page():
 
     components.html(
         _build_tagesfokus_hero(done_count, total, pts_today, today_label),
-        height=230
+        height=270
     )
     st.markdown("---")
 
@@ -4895,6 +4991,74 @@ def render_settings_page():
                 st.success(f"Kategorie '{add_name}' erstellt!")
                 st.rerun()
 
+    # ── Datensicherung / Cloud Backup ──────────────────────────────
+    st.markdown("---")
+    st.markdown("### ☁️ Datensicherung")
+    st.caption("Alle Daten werden lokal in `kaizen.db` gespeichert. Auf Streamlit Cloud wird die DB bei jedem Redeploy gelöscht — hinterlege hier einen GitHub Token für automatisches Backup.")
+
+    last_backup = get_setting("last_backup", "")
+    backup_gist = get_setting("backup_gist_id", "")
+
+    col_status, col_action = st.columns([2, 1])
+    with col_status:
+        if last_backup:
+            try:
+                lb = datetime.fromisoformat(last_backup)
+                mins_ago = int((datetime.utcnow() - lb).total_seconds() / 60)
+                st.success(f"✅ Letztes Backup: vor {mins_ago} Min | Gist: `{backup_gist[:8]}...`" if backup_gist else f"✅ Letztes Backup: {last_backup[:16]}")
+            except Exception:
+                st.info("Backup konfiguriert.")
+        else:
+            st.warning("⚠️ Kein Backup eingerichtet — Daten gehen bei Redeploy verloren.")
+
+    with col_action:
+        if st.button("🔄 Backup jetzt", key="manual_backup"):
+            with st.spinner("Sichere..."):
+                ok = auto_backup_db()
+            if ok:
+                st.success("✅ Gesichert!")
+            else:
+                st.error("Fehler — Token/Gist prüfen.")
+
+    with st.expander("🔧 Backup einrichten"):
+        st.markdown("""
+**So geht's in 2 Minuten:**
+1. Gehe zu [github.com/settings/tokens](https://github.com/settings/tokens) → *Generate new token (classic)*
+2. Nur `gist`-Berechtigung aktivieren
+3. Token hier eintragen → einmal manuell backupen → Gist-ID wird automatisch gespeichert
+
+**Für Streamlit Cloud:** Trage in den App-Secrets ein:
+```
+GITHUB_BACKUP_TOKEN = "ghp_deintoken"
+GITHUB_BACKUP_GIST_ID = "deine_gist_id"  # nach erstem Backup automatisch gesetzt
+```
+        """)
+        with st.form("backup_creds_form"):
+            new_token = st.text_input("GitHub Token (gist-Berechtigung)", type="password",
+                                      placeholder="ghp_...",
+                                      key="backup_token_inp")
+            new_gist  = st.text_input("Gist ID (leer = wird beim ersten Backup erstellt)",
+                                      value=backup_gist, key="backup_gist_inp")
+            if st.form_submit_button("Speichern"):
+                if new_token.strip():
+                    set_setting("backup_github_token", new_token.strip())
+                if new_gist.strip():
+                    set_setting("backup_gist_id", new_gist.strip())
+                st.success("Gespeichert — klick 'Backup jetzt' zum Testen.")
+                st.rerun()
+
+    if backup_gist:
+        with st.expander("📥 Backup wiederherstellen"):
+            st.warning("⚠️ Überschreibt die lokale Datenbank mit dem letzten Backup!")
+            if st.button("Jetzt wiederherstellen", key="manual_restore"):
+                with st.spinner("Wiederherstelle..."):
+                    ok = auto_restore_db()
+                if ok:
+                    st.success("✅ Wiederhergestellt — App neu laden.")
+                    st.rerun()
+                else:
+                    st.error("Fehler — Backup nicht gefunden oder Token ungültig.")
+
 
 def render_season_pass_page():
     st.markdown(URGENCY_CSS, unsafe_allow_html=True)
@@ -5200,6 +5364,14 @@ def render_statistics_page():
 
 def main():
     st.set_page_config(page_title="Kaizen — ADHS-optimiert", layout="wide")
+
+    # Restore from cloud backup if DB missing / empty (Streamlit Cloud redeploy)
+    if 'db_restore_checked' not in st.session_state:
+        st.session_state['db_restore_checked'] = True
+        import os as _os
+        if not _os.path.exists(DB_PATH) or _os.path.getsize(DB_PATH) < 1024:
+            auto_restore_db()
+
     init_db()
 
     if 'page' not in st.session_state:
@@ -5207,6 +5379,11 @@ def main():
 
     sync_recurring_tasks()
     sync_project_tasks()
+
+    # Fire pending backup (non-blocking, background)
+    if st.session_state.pop('_backup_pending', False):
+        import threading as _t
+        _t.Thread(target=auto_backup_db, daemon=True).start()
 
     if 'selected_project' not in st.session_state:
         st.session_state.selected_project = None
