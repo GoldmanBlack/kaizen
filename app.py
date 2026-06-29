@@ -1793,6 +1793,181 @@ def _handle_ki_error(e):
         st.error(f"❌ Fehler: {err}")
 
 
+def ki_plan_task(api_key, task_description, task_date_str):
+    """Call KI to decompose a task into subtasks. Returns list of dicts or None on error."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        today = date.today().isoformat()
+        categories = get_categories()
+        cat_names = ", ".join(f'"{c["name"]}"' for c in categories)
+
+        system_prompt = f"""Du bist ein ADHS-freundlicher Aufgabenplaner. Heute ist {today}.
+Deine Aufgabe: Zerlege eine Aufgabe in alle notwendigen Teilschritte inkl. Vorbereitungen.
+Denke an ALLES: Vorbereitung am Vorabend, Packen, Reisezeit hin und zurück, Nachbereitung.
+Sei konkret und praktisch. Für Termine mit Ortsangabe: schätze Fahrzeit realistisch ein.
+
+Verfügbare Kategorien: {cat_names}
+
+Antworte NUR mit validem JSON, kein Text davor oder danach:
+{{
+  "tasks": [
+    {{
+      "content": "Aufgaben-Beschreibung",
+      "date": "YYYY-MM-DD",
+      "time_hint": "abends" | "morgens" | "mittags" | "nachmittags" | null,
+      "estimate_minutes": 15,
+      "category": "Kategorie-Name aus der Liste oben",
+      "micro_action": "2-min Starter für diese Aufgabe",
+      "note": "Kurze Erklärung warum diese Aufgabe wichtig ist"
+    }}
+  ],
+  "summary": "Kurze Zusammenfassung des Plans"
+}}"""
+
+        user_prompt = f"Plane diese Aufgabe/diesen Termin vollständig:\n{task_description}"
+        if task_date_str:
+            user_prompt += f"\nDatum des Haupttermins: {task_date_str}"
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=1500,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def render_ki_planner_section(api_key):
+    """Renders the KI task planner inside the Planen page."""
+    st.markdown("### 🤖 KI-Aufgabenplaner")
+    st.caption("Beschreibe einen Termin oder eine komplexe Aufgabe — KI plant alles automatisch: Vorbereitung, Reisezeit, Nachbereitung.")
+
+    with st.form("ki_planner_form"):
+        task_input = st.text_area(
+            "Termin / Aufgabe beschreiben",
+            placeholder='z.B. "Psychologen Termin morgen 14:00 Uhr, Praxis in der Innenstadt, ~20 min Fahrzeit"\noder "Präsentation am Freitag um 10:00 Uhr vorbereiten"',
+            height=100
+        )
+        col_date, col_hint = st.columns([1, 1])
+        with col_date:
+            task_date = st.date_input("Datum des Haupttermins", value=date.today() + timedelta(days=1))
+        with col_hint:
+            st.write("")
+            st.write("")
+            st.caption("KI plant auch Vorbereitungen für die Vortage.")
+        submitted = st.form_submit_button("🤖 Plan erstellen", use_container_width=True)
+
+    if submitted and task_input.strip():
+        with st.spinner("KI plant deinen Termin..."):
+            result = ki_plan_task(api_key, task_input.strip(), task_date.isoformat())
+
+        if "error" in result:
+            st.error(f"Fehler: {result['error']}")
+            return
+
+        st.session_state['ki_plan_result'] = result
+        st.session_state['ki_plan_checked'] = {i: True for i in range(len(result.get('tasks', [])))}
+
+    if 'ki_plan_result' in st.session_state:
+        result = st.session_state['ki_plan_result']
+        tasks = result.get('tasks', [])
+        summary = result.get('summary', '')
+
+        if summary:
+            st.info(f"📋 {summary}")
+
+        if not tasks:
+            st.warning("KI hat keine Aufgaben generiert.")
+            return
+
+        categories = get_categories()
+        cat_names  = [c['name'] for c in categories]
+
+        st.markdown(f"**{len(tasks)} Aufgaben geplant** — wähle welche du hinzufügen möchtest:")
+
+        for i, t in enumerate(tasks):
+            checked = st.session_state['ki_plan_checked'].get(i, True)
+            col_chk, col_content = st.columns([0.05, 0.95])
+            with col_chk:
+                new_checked = st.checkbox("", value=checked, key=f"ki_task_chk_{i}",
+                                          label_visibility="collapsed")
+                st.session_state['ki_plan_checked'][i] = new_checked
+            with col_content:
+                date_str  = t.get('date', date.today().isoformat())
+                time_hint = t.get('time_hint', '')
+                est       = t.get('estimate_minutes', 0)
+                cat_name  = t.get('category', '')
+                cat_obj   = next((c for c in categories if c['name'] == cat_name), None)
+                cat_badge = (f'<span style="background:{cat_obj["color"]}28;color:{cat_obj["color"]};'
+                             f'font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;'
+                             f'border:1px solid {cat_obj["color"]}44">{cat_obj["icon"]} {cat_name}</span>'
+                             if cat_obj else '')
+                micro = t.get('micro_action', '')
+                note  = t.get('note', '')
+                time_label = f" · {time_hint}" if time_hint else ""
+                st.markdown(
+                    f'<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);'
+                    f'opacity:{"1" if new_checked else "0.35"}">'
+                    f'<strong>{t["content"]}</strong> {cat_badge}<br>'
+                    f'<span style="font-size:11px;color:rgba(255,255,255,0.4)">'
+                    f'📅 {date_str}{time_label} · ⏱️ ~{est} min'
+                    f'{"  ·  ⚡ " + micro if micro else ""}</span>'
+                    f'{"<br><span style=\'font-size:10px;color:rgba(255,255,255,0.3)\'>" + note + "</span>" if note else ""}'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+        st.write("")
+        selected_count = sum(1 for v in st.session_state['ki_plan_checked'].values() if v)
+        col_add, col_clear = st.columns([2, 1])
+        with col_add:
+            if st.button(f"✅ {selected_count} Aufgaben hinzufügen", key="ki_plan_add",
+                         use_container_width=True, disabled=selected_count == 0):
+                added = 0
+                for i, t in enumerate(tasks):
+                    if not st.session_state['ki_plan_checked'].get(i):
+                        continue
+                    cat_name = t.get('category', '')
+                    cat_obj  = next((c for c in categories if c['name'] == cat_name), None)
+                    new_id = add_entry(
+                        "brain",
+                        t['content'],
+                        estimate=t.get('estimate_minutes', 0),
+                        entry_date=t.get('date', date.today().isoformat())
+                    )
+                    if new_id:
+                        if cat_obj:
+                            set_entry_category(new_id, cat_obj['id'])
+                        micro = t.get('micro_action', '').strip()
+                        if micro:
+                            conn_kp = sqlite3.connect(DB_PATH)
+                            conn_kp.execute("UPDATE entries SET micro_action=? WHERE id=?", (micro, new_id))
+                            conn_kp.commit()
+                            conn_kp.close()
+                    added += 1
+                del st.session_state['ki_plan_result']
+                del st.session_state['ki_plan_checked']
+                st.success(f"✅ {added} Aufgaben wurden hinzugefügt!")
+                st.rerun()
+        with col_clear:
+            if st.button("✕ Verwerfen", key="ki_plan_clear", use_container_width=True):
+                del st.session_state['ki_plan_result']
+                del st.session_state['ki_plan_checked']
+                st.rerun()
+
+
 def render_ki_coach_page():
     st.title("🤖 KI Coach")
 
@@ -2404,6 +2579,21 @@ def render_planen_page():
             if st.button("✅ Fertig — zum Tagesfokus", key="plan_step4_done", use_container_width=True):
                 st.session_state.page = "Tagesfokus"
                 st.rerun()
+
+    # ── KI Aufgabenplaner ─────────────────────────────────────────
+    st.markdown("---")
+    api_key_plan = get_setting('nvidia_api_key', '')
+    if not api_key_plan:
+        with st.expander("🤖 KI-Aufgabenplaner (API-Key nötig)"):
+            st.caption("Einmal hinterlegen — dann auf allen Seiten verfügbar.")
+            with st.form("plan_api_key_form"):
+                k = st.text_input("NVIDIA API Key", type="password", placeholder="nvapi-...", key="plan_api_key_input")
+                if st.form_submit_button("Speichern"):
+                    if k.strip():
+                        set_setting('nvidia_api_key', k.strip())
+                        st.rerun()
+    else:
+        render_ki_planner_section(api_key_plan)
 
 
 HABIT_ICONS = ["💧","🏋️","📚","🧘","🏃","✍️","🎯","🍎","😴","💊","🌿","🎵","💻","🙏","❤️","🌞",
