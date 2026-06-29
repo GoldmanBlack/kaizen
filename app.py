@@ -58,6 +58,20 @@ def init_db():
         value TEXT
     )
     ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS recurring_tasks (
+        id INTEGER PRIMARY KEY,
+        entry_type TEXT DEFAULT 'brain',
+        content TEXT,
+        tags TEXT,
+        estimate_minutes INTEGER DEFAULT 0,
+        recurrence TEXT DEFAULT '0,1,2,3,4,5,6',
+        time_of_day TEXT DEFAULT 'anytime',
+        active INTEGER DEFAULT 1,
+        created_at TEXT,
+        last_generated TEXT
+    )
+    ''')
     conn.commit()
     conn.close()
 
@@ -292,6 +306,105 @@ def delete_all_data():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM entries')
+    conn.commit()
+    conn.close()
+
+
+# ========== RECURRING TASKS ==========
+
+DAY_ABBR = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+
+RECURRENCE_PRESETS = {
+    "Täglich":              "0,1,2,3,4,5,6",
+    "Wochentage (Mo–Fr)":   "0,1,2,3,4",
+    "Wochenende":           "5,6",
+    "Benutzerdefiniert":    None,
+}
+
+TIME_ICONS = {"morgen": "🌅", "abend": "🌙", "anytime": "📋"}
+TIME_LABELS = {"morgen": "Morgen-Routine", "abend": "Abend-Routine", "anytime": "Aufgaben"}
+
+
+def format_recurrence(rec_str):
+    for label, val in RECURRENCE_PRESETS.items():
+        if val == rec_str:
+            return label
+    days = [int(d) for d in rec_str.split(',') if d.strip().isdigit()]
+    return ", ".join(DAY_ABBR[d] for d in sorted(days) if 0 <= d <= 6)
+
+
+def get_recurring_tasks():
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, entry_type, content, tags, estimate_minutes, recurrence, time_of_day, active, last_generated FROM recurring_tasks ORDER BY time_of_day, id')
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def add_recurring_task(entry_type, content, tags, estimate, recurrence, time_of_day):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''INSERT INTO recurring_tasks (entry_type, content, tags, estimate_minutes, recurrence, time_of_day, active, created_at)
+                 VALUES (?,?,?,?,?,?,1,?)''',
+              (entry_type, content, tags or "", estimate, recurrence, time_of_day, now))
+    conn.commit()
+    conn.close()
+
+
+def delete_recurring_task(rt_id):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('DELETE FROM recurring_tasks WHERE id=?', (rt_id,))
+    conn.commit()
+    conn.close()
+
+
+def toggle_recurring_active(rt_id, new_val):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('UPDATE recurring_tasks SET active=? WHERE id=?', (1 if new_val else 0, rt_id))
+    conn.commit()
+    conn.close()
+
+
+def sync_recurring_tasks():
+    """Auto-generate today's entries from active recurring tasks (runs once per day)."""
+    today = date.today()
+    today_str = today.isoformat()
+    weekday = today.weekday()
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, entry_type, content, tags, estimate_minutes, recurrence, time_of_day, last_generated FROM recurring_tasks WHERE active=1')
+    recurring = c.fetchall()
+
+    for rt in recurring:
+        rt_id, etype, content, tags, estimate, recurrence, time_of_day, last_generated = rt
+        if last_generated == today_str:
+            continue
+        try:
+            days = [int(d) for d in recurrence.split(',') if d.strip().isdigit()]
+        except Exception:
+            continue
+        if weekday not in days:
+            continue
+
+        full_tags = f"routine,{time_of_day}" if time_of_day != "anytime" else "routine"
+        if tags:
+            full_tags = f"{full_tags},{tags}"
+
+        c.execute('SELECT COUNT(*) FROM entries WHERE entry_date=? AND content=? AND tags LIKE ?',
+                  (today_str, content, '%routine%'))
+        if c.fetchone()[0] == 0:
+            now = datetime.utcnow().isoformat()
+            c.execute('''INSERT INTO entries (entry_type, content, tags, estimate_minutes, points, created_at, entry_date, last_modified)
+                         VALUES (?,?,?,?,0,?,?,?)''',
+                      (etype, content, full_tags, estimate, now, today_str, now))
+
+        c.execute('UPDATE recurring_tasks SET last_generated=? WHERE id=?', (today_str, rt_id))
+
     conn.commit()
     conn.close()
 
@@ -738,6 +851,95 @@ def _render_entry_card(r):
                 st.rerun()
 
 
+def render_routinen_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+    st.title("Routinen")
+    st.caption("Aufgaben die sich wiederholen — werden automatisch jeden Tag eingeplant.")
+
+    routines = get_recurring_tasks()
+
+    # ── Neue Routine hinzufügen ──────────────────────────────────────────────
+    with st.expander("➕ Neue Routine hinzufügen", expanded=len(routines) == 0):
+        with st.form("new_routine_form"):
+            content = st.text_input("Aufgabe", placeholder="z.B. Meditation, Journal schreiben...")
+            col1, col2 = st.columns(2)
+            with col1:
+                etype = st.selectbox("Typ", ["micro", "brain", "highlight"],
+                                      format_func=lambda x: TYPE_LABELS.get(x, x))
+                time_of_day = st.selectbox("Tageszeit",
+                                            ["morgen", "abend", "anytime"],
+                                            format_func=lambda x: f"{TIME_ICONS[x]} {TIME_LABELS[x]}")
+            with col2:
+                estimate = st.number_input("Minuten", min_value=0, step=5, value=5)
+                tags = st.text_input("Extra-Tags (optional)")
+
+            st.markdown("**Wiederholung**")
+            preset = st.radio("Vorlage", list(RECURRENCE_PRESETS.keys()), horizontal=True)
+            if preset == "Benutzerdefiniert":
+                day_cols = st.columns(7)
+                selected_days = []
+                for i, (col, abbr) in enumerate(zip(day_cols, DAY_ABBR)):
+                    if col.checkbox(abbr, value=True, key=f"day_{i}"):
+                        selected_days.append(str(i))
+                recurrence = ",".join(selected_days) if selected_days else "0,1,2,3,4,5,6"
+            else:
+                recurrence = RECURRENCE_PRESETS[preset]
+
+            if st.form_submit_button("Routine speichern", use_container_width=True):
+                if content.strip():
+                    add_recurring_task(etype, content.strip(), tags, estimate, recurrence, time_of_day)
+                    st.rerun()
+
+    st.markdown("---")
+
+    if not routines:
+        st.info("Noch keine Routinen — füge deine erste Morgen- oder Abend-Routine hinzu.")
+        return
+
+    # ── Routinen anzeigen, gruppiert nach Tageszeit ───────────────────────────
+    groups = [("morgen", "🌅 Morgen-Routine"), ("abend", "🌙 Abend-Routine"), ("anytime", "📋 Aufgaben")]
+    for g_key, g_label in groups:
+        group = [r for r in routines if r[6] == g_key]
+        if not group:
+            continue
+        st.subheader(g_label)
+        for rt in group:
+            rt_id, etype, content, tags, estimate, recurrence, time_of_day, active, last_generated = rt
+            rec_label = format_recurrence(recurrence)
+            type_label = TYPE_LABELS.get(etype, etype)
+
+            today_str = date.today().isoformat()
+            synced_today = last_generated == today_str
+
+            card_style = (
+                "border-left:4px solid #4ade80;background:rgba(74,222,128,0.06);"
+                if active else
+                "border-left:4px solid #475569;background:rgba(71,85,105,0.04);opacity:.5;"
+            )
+            st.markdown(
+                f'<div style="{card_style}border-radius:8px;padding:12px 16px;margin-bottom:8px">'
+                f'<strong>{content}</strong>'
+                f'<span class="dl-badge">{rec_label}</span>'
+                f'<span class="dl-badge">{type_label}</span>'
+                + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else "")
+                + (f'<span class="dl-badge" style="color:#4ade80">✅ heute eingeplant</span>' if synced_today else "")
+                + '</div>', unsafe_allow_html=True
+            )
+            c_tog, c_del, _ = st.columns([0.18, 0.18, 0.64])
+            with c_tog:
+                new_active = st.toggle("Aktiv", value=bool(active), key=f"rt_tog_{rt_id}")
+                if new_active != bool(active):
+                    toggle_recurring_active(rt_id, new_active)
+                    st.rerun()
+            with c_del:
+                if st.button("🗑️ Löschen", key=f"rt_del_{rt_id}"):
+                    delete_recurring_task(rt_id)
+                    st.rerun()
+
+    st.markdown("---")
+    st.caption(f"Routinen werden täglich beim App-Start automatisch in den Tagesplan eingeplant.")
+
+
 def render_statistics_page():
     st.title("📊 Deine Kaizen-Statistiken")
     stats = get_analytics_stats()
@@ -800,7 +1002,9 @@ def main():
     if 'page' not in st.session_state:
         st.session_state.page = 'Start'
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Alle Einträge", "Statistiken"]
+    sync_recurring_tasks()
+
+    PAGES = ["Start", "Planen", "Tagesfokus", "Alle Einträge", "Routinen", "Statistiken"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -817,6 +1021,8 @@ def main():
         render_tagesfokus_page()
     elif page == "Alle Einträge":
         render_alle_eintraege_page()
+    elif page == "Routinen":
+        render_routinen_page()
     elif page == "Statistiken":
         render_statistics_page()
 
