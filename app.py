@@ -504,6 +504,27 @@ def init_db():
         """, (ik,nm,desc,cat,icon,cost,rar,eft,efv,unlvl,stack))
     # Ensure player_season row exists
     c.execute("INSERT OR IGNORE INTO player_season (id,season_id,season_xp) VALUES (1,1,0)")
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS task_steps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER NOT NULL,
+        step_number INTEGER NOT NULL,
+        content TEXT NOT NULL,
+        done INTEGER DEFAULT 0,
+        completed_at TEXT,
+        UNIQUE(entry_id, step_number)
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS task_analysis (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER UNIQUE NOT NULL,
+        summary TEXT,
+        time_estimate INTEGER DEFAULT 0,
+        context_note TEXT,
+        analyzed_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
     conn.commit()
     conn.close()
 
@@ -569,6 +590,60 @@ def get_category(cat_id):
 def set_entry_category(entry_id, category_id):
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE entries SET category_id=? WHERE id=?", (category_id, entry_id))
+    conn.commit()
+    conn.close()
+
+
+# ── Task Steps ──────────────────────────────────────────────────
+
+def get_task_steps(entry_id):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, step_number, content, done, completed_at FROM task_steps "
+        "WHERE entry_id=? ORDER BY step_number", (entry_id,)
+    ).fetchall()
+    conn.close()
+    return [{'id': r[0], 'step_number': r[1], 'content': r[2], 'done': bool(r[3]), 'completed_at': r[4]} for r in rows]
+
+
+def save_task_steps(entry_id, steps):
+    """Replace all steps for an entry. steps = list of strings."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM task_steps WHERE entry_id=?", (entry_id,))
+    for i, s in enumerate(steps, 1):
+        conn.execute("INSERT OR REPLACE INTO task_steps (entry_id, step_number, content) VALUES (?,?,?)",
+                     (entry_id, i, s.strip()))
+    conn.commit()
+    conn.close()
+
+
+def toggle_step(step_id, done):
+    conn = sqlite3.connect(DB_PATH)
+    ts = datetime.utcnow().isoformat() if done else None
+    conn.execute("UPDATE task_steps SET done=?, completed_at=? WHERE id=?", (int(done), ts, step_id))
+    conn.commit()
+    conn.close()
+
+
+def get_task_analysis(entry_id):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT summary, time_estimate, context_note, analyzed_at FROM task_analysis WHERE entry_id=?",
+        (entry_id,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return {'summary': row[0], 'time_estimate': row[1], 'context_note': row[2], 'analyzed_at': row[3]}
+    return None
+
+
+def save_task_analysis(entry_id, summary, time_estimate, context_note):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR REPLACE INTO task_analysis (entry_id, summary, time_estimate, context_note, analyzed_at) "
+        "VALUES (?,?,?,?,?)",
+        (entry_id, summary, time_estimate, context_note, datetime.utcnow().isoformat())
+    )
     conn.commit()
     conn.close()
 
@@ -1849,6 +1924,213 @@ Antworte NUR mit validem JSON, kein Text davor oder danach:
         return {"error": str(e)}
 
 
+def ki_analyze_full_day(api_key):
+    """
+    KI reads ALL today's + tomorrow's entries, breaks each task into micro-steps,
+    detects appointments and creates prep tasks for the day before.
+    Returns dict with per-entry analysis + prep_tasks list.
+    """
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+        today      = date.today()
+        tomorrow   = today + timedelta(days=1)
+        categories = get_categories()
+        cat_names  = ", ".join(f'"{c["name"]}"' for c in categories)
+
+        # Gather context: today + tomorrow entries
+        conn = sqlite3.connect(DB_PATH)
+        today_rows = conn.execute(
+            "SELECT id, entry_type, content, estimate_minutes, micro_action, category_id, deadline "
+            "FROM entries WHERE entry_date=? AND done=0",
+            (today.isoformat(),)
+        ).fetchall()
+        tomorrow_rows = conn.execute(
+            "SELECT id, entry_type, content, estimate_minutes, deadline "
+            "FROM entries WHERE entry_date=? AND done=0",
+            (tomorrow.isoformat(),)
+        ).fetchall()
+        # Upcoming deadlines (next 7 days)
+        deadline_rows = conn.execute(
+            "SELECT content, deadline FROM entries WHERE deadline IS NOT NULL AND done=0 "
+            "ORDER BY deadline LIMIT 10"
+        ).fetchall()
+        # Active projects
+        projects = conn.execute(
+            "SELECT name, description, deadline FROM projects WHERE active=1 LIMIT 5"
+        ).fetchall()
+        # Past performance (avg completion rate last 7 days)
+        conn.close()
+
+        task_list = "\n".join(
+            f'- ID:{r[0]} [{r[1]}] "{r[2]}" (~{r[3] or "?"}min)'
+            + (f' | Mikro: {r[4]}' if r[4] else '')
+            for r in today_rows
+        ) or "Keine Aufgaben für heute."
+
+        tomorrow_list = "\n".join(
+            f'- "{r[2]}" (~{r[3] or "?"}min)' + (f' | Deadline: {r[4]}' if r[4] else '')
+            for r in tomorrow_rows
+        ) or "Nichts für morgen geplant."
+
+        deadline_list = "\n".join(
+            f'- "{r[0]}" → Deadline: {r[1]}' for r in deadline_rows
+        ) or "Keine anstehenden Deadlines."
+
+        project_list = "\n".join(
+            f'- {r[0]}: {r[1] or ""}' + (f' (Deadline: {r[2]})' if r[2] else '')
+            for r in projects
+        ) or "Keine aktiven Projekte."
+
+        system_prompt = f"""Du bist ein intelligenter ADHS-Aufgabenplaner. Heute ist {today.isoformat()}.
+Deine Aufgabe: Analysiere alle Aufgaben des Nutzers und plane sie ADHS-gerecht:
+1. Zerlege jede Aufgabe in 3-6 kleine, konkrete Mikro-Schritte (je 2-10 min)
+2. Erkenne Termine/Appointments und erstelle Vorbereitungsaufgaben für den Vortag
+3. Schätze die reale Zeitdauer realistisch (ADHS: +30% einkalkulieren)
+4. Gib einen kurzen Kontext-Hinweis warum die Aufgabe wichtig ist
+Verfügbare Kategorien: {cat_names}
+Antworte NUR mit validem JSON."""
+
+        user_prompt = f"""HEUTE ({today.isoformat()}) - Meine Aufgaben:
+{task_list}
+
+MORGEN ({tomorrow.isoformat()}) - Geplant:
+{tomorrow_list}
+
+DEADLINES (nächste 7 Tage):
+{deadline_list}
+
+AKTIVE PROJEKTE:
+{project_list}
+
+Erstelle für JEDE heutige Aufgabe (anhand der ID) eine Analyse.
+Erkenne auch Termine in den morgigen Aufgaben und erstelle passende Vorbereitungsaufgaben für HEUTE.
+
+JSON-Format:
+{{
+  "tasks": [
+    {{
+      "entry_id": 123,
+      "steps": ["Schritt 1 konkret", "Schritt 2 konkret", "..."],
+      "real_estimate_minutes": 45,
+      "context_note": "Kurze Begründung warum wichtig",
+      "summary": "Ein Satz was diese Aufgabe bringt"
+    }}
+  ],
+  "prep_tasks": [
+    {{
+      "content": "Vorbereitungsaufgabe",
+      "date": "{today.isoformat()}",
+      "for_tomorrow": "Für was diese Vorbereitung ist",
+      "estimate_minutes": 10,
+      "category": "Kategorie-Name",
+      "micro_action": "2-min Starter"
+    }}
+  ],
+  "day_summary": "Gesamteinschätzung des Tages in 1-2 Sätzen",
+  "focus_order": [liste der entry_ids in empfohlener Reihenfolge],
+  "total_estimated_minutes": 180
+}}"""
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt}
+            ],
+            max_tokens=2500,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ki_evening_review(api_key):
+    """Generate an evening review: what was done, upcoming, suggestions."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+        today = date.today()
+        conn  = sqlite3.connect(DB_PATH)
+        done_today = conn.execute(
+            "SELECT content, elapsed_seconds, points FROM entries "
+            "WHERE entry_date=? AND done=1 ORDER BY completed_at", (today.isoformat(),)
+        ).fetchall()
+        open_today = conn.execute(
+            "SELECT content FROM entries WHERE entry_date=? AND done=0", (today.isoformat(),)
+        ).fetchall()
+        upcoming = conn.execute(
+            "SELECT content, deadline, entry_date FROM entries "
+            "WHERE done=0 AND (deadline IS NOT NULL OR entry_date > ?) "
+            "ORDER BY COALESCE(deadline, entry_date) LIMIT 10",
+            (today.isoformat(),)
+        ).fetchall()
+        # Last 7 days completion rates
+        perf = conn.execute(
+            "SELECT entry_date, SUM(done), COUNT(*) FROM entries "
+            "WHERE entry_date >= date(?, '-7 days') GROUP BY entry_date ORDER BY entry_date",
+            (today.isoformat(),)
+        ).fetchall()
+        conn.close()
+
+        done_str = "\n".join(
+            f'- "{r[0]}" ({int(r[1]/60) if r[1] else "?"}min, {r[2]}pts)' for r in done_today
+        ) or "Nichts erledigt."
+        open_str = "\n".join(f'- "{r[0]}"' for r in open_today) or "Alles erledigt! 🎉"
+        upcoming_str = "\n".join(
+            f'- "{r[0]}"' + (f' → {r[1] or r[2]}' if (r[1] or r[2]) else '') for r in upcoming
+        ) or "Nichts anstehendes."
+        perf_str = "\n".join(
+            f'- {r[0]}: {r[1]}/{r[2]} erledigt ({int(r[1]/r[2]*100) if r[2] else 0}%)'
+            for r in perf
+        )
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    f"Du bist ein empathischer ADHS-Coach. Heute ist {today.isoformat()}. "
+                    "Gib ein kurzes, motivierendes Abendreview auf Deutsch. "
+                    "Antworte ausschließlich mit validem JSON."
+                )
+            }, {
+                "role": "user",
+                "content": f"""HEUTE ERLEDIGT:\n{done_str}\n\nNOCH OFFEN HEUTE:\n{open_str}
+\nANSTEHENDE AUFGABEN/TERMINE:\n{upcoming_str}\n\nPERFORMANCE LETZTE 7 TAGE:\n{perf_str}
+
+JSON-Format:
+{{
+  "headline": "Kurze Überschrift für den Tag (1 Satz)",
+  "wins": ["Erfolg 1", "Erfolg 2"],
+  "open_note": "Kurzer Kommentar zu nicht erledigten Aufgaben (kein Vorwurf!)",
+  "upcoming_alerts": ["Wichtiger Termin: ...", "Deadline: ..."],
+  "optimization_tip": "1 konkreter Verbesserungsvorschlag für morgen",
+  "motivation": "1 kurzer Motivationssatz",
+  "tomorrow_focus": "Die EINE wichtigste Aufgabe für morgen"
+}}"""
+            }],
+            max_tokens=800,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def render_ki_planner_section(api_key):
     """Renders the KI task planner inside the Planen page."""
     st.markdown("### 🤖 KI-Aufgabenplaner")
@@ -2402,6 +2684,78 @@ def render_lofi_start_page():
     st.markdown("---")
     st.write("💡 **Was dich erwartet:** Brain Dump → Daily Highlight → Micro-Commitment → Tagesfokus")
 
+    # ── Abendreview ─────────────────────────────────────────────
+    today = date.today()
+    conn  = sqlite3.connect(DB_PATH)
+    done_today  = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=? AND done=1", (today.isoformat(),)).fetchone()[0]
+    total_today = conn.execute("SELECT COUNT(*) FROM entries WHERE entry_date=?", (today.isoformat(),)).fetchone()[0]
+    # Upcoming deadlines within 7 days
+    deadline_alerts = conn.execute(
+        "SELECT content, deadline FROM entries WHERE done=0 AND deadline IS NOT NULL "
+        "AND deadline <= date(?, '+7 days') ORDER BY deadline LIMIT 5",
+        (today.isoformat(),)
+    ).fetchall()
+    conn.close()
+
+    if total_today > 0:
+        st.markdown("---")
+        st.markdown("### 🌙 Tagesrückblick")
+        dc1, dc2, dc3 = st.columns(3)
+        dc1.metric("Heute erledigt", f"{done_today}/{total_today}")
+        dc2.metric("Quote", f"{int(done_today/total_today*100)}%")
+        dc3.metric("Offen", total_today - done_today)
+
+        if deadline_alerts:
+            st.markdown("**⚠️ Anstehende Deadlines:**")
+            for content, dl in deadline_alerts:
+                days_left = (date.fromisoformat(dl) - today).days
+                color = "#e74c3c" if days_left <= 1 else "#f39c12" if days_left <= 3 else "#00d4ff"
+                st.markdown(
+                    f'<div style="padding:6px 10px;margin:3px 0;background:rgba(255,255,255,.05);'
+                    f'border-left:3px solid {color};border-radius:4px;font-size:13px">'
+                    f'<strong>{content}</strong> — '
+                    f'<span style="color:{color}">{dl} ({days_left}d)</span></div>',
+                    unsafe_allow_html=True
+                )
+
+        api_k = get_setting('nvidia_api_key', '')
+        if api_k:
+            er_col, _ = st.columns([1, 2])
+            with er_col:
+                if st.button("🤖 KI-Abendreview", key="start_evening_review", use_container_width=True):
+                    with st.spinner("KI analysiert deinen Tag..."):
+                        review = ki_evening_review(api_k)
+                    st.session_state['evening_review'] = review
+                    st.rerun()
+
+            if 'evening_review' in st.session_state:
+                rv = st.session_state['evening_review']
+                if 'error' in rv:
+                    st.error(f"Fehler: {rv['error']}")
+                else:
+                    st.markdown(f"#### {rv.get('headline', 'Tagesrückblick')}")
+                    wins = rv.get('wins', [])
+                    if wins:
+                        st.markdown("**🏆 Wins:**")
+                        for w in wins:
+                            st.markdown(f"- {w}")
+                    if rv.get('open_note'):
+                        st.info(f"📝 {rv['open_note']}")
+                    alerts = rv.get('upcoming_alerts', [])
+                    if alerts:
+                        st.markdown("**⏰ Wichtiges morgen:**")
+                        for a in alerts:
+                            st.warning(a)
+                    if rv.get('optimization_tip'):
+                        st.markdown(f"**💡 Tipp für morgen:** {rv['optimization_tip']}")
+                    if rv.get('tomorrow_focus'):
+                        st.success(f"🎯 Morgen wichtigste Aufgabe: **{rv['tomorrow_focus']}**")
+                    if rv.get('motivation'):
+                        st.markdown(f"*{rv['motivation']}*")
+                    if st.button("✕ Schließen", key="close_review"):
+                        del st.session_state['evening_review']
+                        st.rerun()
+
 
 def render_start_page():
     render_lofi_start_page()
@@ -2579,6 +2933,88 @@ def render_planen_page():
             if st.button("✅ Fertig — zum Tagesfokus", key="plan_step4_done", use_container_width=True):
                 st.session_state.page = "Tagesfokus"
                 st.rerun()
+
+    # ── KI Tag analysieren ────────────────────────────────────────
+    st.markdown("---")
+    api_key_plan = get_setting('nvidia_api_key', '')
+    if api_key_plan and brain_rows:
+        st.markdown("### 🧠 KI-Tagesanalyse")
+        st.caption("KI analysiert alle deine Aufgaben, zerlegt sie in Mikro-Schritte und erkennt morgen Termine für Vorbereitungen heute.")
+        col_ana, col_info = st.columns([1, 2])
+        with col_ana:
+            if st.button("🔍 Tag analysieren", key="plan_analyze_day", use_container_width=True):
+                with st.spinner("KI analysiert deinen Tag..."):
+                    result = ki_analyze_full_day(api_key_plan)
+                st.session_state['day_analysis'] = result
+                st.rerun()
+        with col_info:
+            if 'day_analysis' in st.session_state and 'day_summary' in st.session_state['day_analysis']:
+                st.info(f"📋 {st.session_state['day_analysis']['day_summary']}")
+
+        if 'day_analysis' in st.session_state:
+            da = st.session_state['day_analysis']
+            if 'error' in da:
+                st.error(f"Fehler: {da['error']}")
+            else:
+                tasks_analyzed = da.get('tasks', [])
+                prep_tasks     = da.get('prep_tasks', [])
+                total_min      = da.get('total_estimated_minutes', 0)
+                focus_order    = da.get('focus_order', [])
+
+                if total_min:
+                    h, m = divmod(total_min, 60)
+                    st.caption(f"⏱️ Geschätzte Gesamtzeit: {h}h {m}min")
+
+                if focus_order:
+                    order_names = []
+                    entry_map = {r[0]: r[2] for r in brain_rows}
+                    for eid in focus_order[:5]:
+                        if eid in entry_map:
+                            order_names.append(entry_map[eid][:35])
+                    if order_names:
+                        st.caption("🎯 Empfohlene Reihenfolge: " + " → ".join(order_names))
+
+                if tasks_analyzed:
+                    if st.button(f"✅ Mikro-Schritte für {len(tasks_analyzed)} Aufgaben speichern",
+                                 key="plan_save_analysis", use_container_width=True):
+                        saved = 0
+                        for t in tasks_analyzed:
+                            eid   = t.get('entry_id')
+                            steps = t.get('steps', [])
+                            if eid and steps:
+                                save_task_steps(eid, steps)
+                                save_task_analysis(
+                                    eid,
+                                    t.get('summary', ''),
+                                    t.get('real_estimate_minutes', 0),
+                                    t.get('context_note', '')
+                                )
+                            saved += 1
+                        # Add prep tasks
+                        prep_added = 0
+                        categories_all = get_categories()
+                        for pt in prep_tasks:
+                            cat_name = pt.get('category', '')
+                            cat_obj  = next((c for c in categories_all if c['name'] == cat_name), None)
+                            new_id   = add_entry(
+                                "brain", pt['content'],
+                                estimate=pt.get('estimate_minutes', 10),
+                                entry_date=pt.get('date', date.today().isoformat())
+                            )
+                            if new_id:
+                                if cat_obj:
+                                    set_entry_category(new_id, cat_obj['id'])
+                                micro = pt.get('micro_action', '').strip()
+                                if micro:
+                                    conn_pp = sqlite3.connect(DB_PATH)
+                                    conn_pp.execute("UPDATE entries SET micro_action=? WHERE id=?",
+                                                    (micro, new_id))
+                                    conn_pp.commit()
+                                    conn_pp.close()
+                                prep_added += 1
+                        del st.session_state['day_analysis']
+                        st.success(f"✅ {saved} Aufgaben analysiert, {prep_added} Vorbereitungsaufgaben hinzugefügt!")
+                        st.rerun()
 
     # ── KI Aufgabenplaner ─────────────────────────────────────────
     st.markdown("---")
@@ -3100,9 +3536,31 @@ def render_tagesfokus_page():
                       f'⚡ Starten mit: <em>{micro_action}</em></span>'
                       if micro_action and not done else "")
 
+        # ── Steps progress inline ──
+        steps = get_task_steps(eid)
+        steps_html = ""
+        if steps and not done:
+            done_s = sum(1 for s in steps if s['done'])
+            total_s = len(steps)
+            pct_s  = done_s / total_s if total_s else 0
+            bar_w  = int(pct_s * 100)
+            steps_html = (
+                f'<div style="margin-top:6px">'
+                f'<span style="font-size:10px;color:rgba(255,255,255,.45)">Schritte: {done_s}/{total_s}</span>'
+                f'<div style="background:rgba(255,255,255,.1);border-radius:4px;height:4px;margin-top:3px">'
+                f'<div style="background:#00d4ff;width:{bar_w}%;height:4px;border-radius:4px;'
+                f'transition:width .3s"></div></div></div>'
+            )
+        analysis = get_task_analysis(eid)
+        analysis_html = ""
+        if analysis and analysis.get('context_note') and not done:
+            analysis_html = (f'<div style="font-size:10px;color:rgba(255,255,255,.35);'
+                             f'margin-top:4px;font-style:italic">{analysis["context_note"]}</div>')
+
         st.markdown(
             f'<div class="{card_cls}"><strong>{content}</strong>{dl_html}{cat_html}{micro_html}'
             + (f'<br><small style="opacity:.55">ca. {estimate} min</small>' if estimate else "")
+            + steps_html + analysis_html
             + "</div>", unsafe_allow_html=True
         )
 
@@ -3208,6 +3666,70 @@ def render_tagesfokus_page():
                     if st.button("✕", key=f"{pfx}_ccancel_{eid}", use_container_width=True):
                         st.session_state[f"show_cat_{eid}"] = False
                         st.rerun()
+
+        # ── Steps Checklist ──────────────────────────────────────
+        if steps and not done:
+            with st.expander(
+                f"📋 Schritte ({sum(1 for s in steps if s['done'])}/{len(steps)})",
+                expanded=st.session_state.get(f"steps_open_{eid}", False)
+            ):
+                for s in steps:
+                    scol1, scol2 = st.columns([0.06, 0.94])
+                    with scol1:
+                        step_done = st.checkbox(
+                            "", value=s['done'],
+                            key=f"{pfx}_step_{s['id']}",
+                            label_visibility="collapsed"
+                        )
+                        if step_done != s['done']:
+                            toggle_step(s['id'], step_done)
+                            st.rerun()
+                    with scol2:
+                        style = "text-decoration:line-through;opacity:.4" if s['done'] else "opacity:.85"
+                        st.markdown(
+                            f'<span style="font-size:13px;{style}">{s["content"]}</span>',
+                            unsafe_allow_html=True
+                        )
+                # Re-plan button
+                st.markdown("---")
+                replan_col, _ = st.columns([1, 2])
+                with replan_col:
+                    if st.button("🤖 Neu planen", key=f"{pfx}_replan_{eid}", use_container_width=True):
+                        st.session_state[f"replan_{eid}"] = True
+                        st.rerun()
+
+            if st.session_state.get(f"replan_{eid}"):
+                api_k = get_setting('nvidia_api_key', '')
+                if api_k:
+                    with st.spinner("KI plant Schritte neu..."):
+                        try:
+                            from openai import OpenAI as _OAI
+                            _cl = _OAI(base_url=NVIDIA_BASE_URL, api_key=api_k)
+                            rr  = _cl.chat.completions.create(
+                                model=KIMI_MODEL,
+                                messages=[{
+                                    "role": "system",
+                                    "content": "Du zerlegst eine Aufgabe in 3-6 Mikro-Schritte (je 2-8 min). Antworte nur mit JSON."
+                                }, {
+                                    "role": "user",
+                                    "content": f'Aufgabe: "{content}"\nErstelle 3-6 konkrete Mikro-Schritte.\nJSON: {{"steps": ["Schritt 1", "Schritt 2", ...]}}'
+                                }],
+                                max_tokens=400, stream=False
+                            )
+                            raw2 = rr.choices[0].message.content.strip()
+                            if raw2.startswith("```"):
+                                raw2 = raw2.split("```")[1]
+                                if raw2.startswith("json"):
+                                    raw2 = raw2[4:]
+                            new_steps = json.loads(raw2).get('steps', [])
+                            if new_steps:
+                                save_task_steps(eid, new_steps)
+                        except Exception:
+                            pass
+                    st.session_state.pop(f"replan_{eid}", None)
+                    st.rerun()
+                else:
+                    st.warning("Kein API-Key — im KI Coach hinterlegen.")
 
     open_hl    = sum(1 for r in highlights if not r[9])
     open_todos = sum(1 for r in brains if not r[9])
