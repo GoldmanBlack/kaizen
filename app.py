@@ -5721,18 +5721,43 @@ def main():
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
-    st.sidebar.title("Kaizen Navigation")
-    page = st.sidebar.selectbox("Seite wählen", PAGES,
-                                  index=PAGES.index(st.session_state.page))
+    # ── Brand Header ──────────────────────────────────────────
+    st.sidebar.markdown("""
+<div style="text-align:center;padding:18px 0 10px 0">
+  <div style="font-size:30px;margin-bottom:6px">⛰️</div>
+  <div style="font-size:17px;font-weight:900;letter-spacing:4px;
+              background:linear-gradient(135deg,#00d4ff 0%,#a29bfe 100%);
+              -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+              background-clip:text;display:inline-block">KAIZEN</div>
+  <div style="font-size:9px;color:rgba(255,255,255,0.25);letter-spacing:2px;
+              text-transform:uppercase;margin-top:3px">Daily Flow System</div>
+</div>""", unsafe_allow_html=True)
+
+    # ── Navigation ────────────────────────────────────────────
+    _PAGE_ICONS = {
+        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯",
+        "Projekte": "📁", "Alle Einträge": "📅", "Routinen": "🔄",
+        "Habits": "✅", "Charakter": "🧙", "Season Pass": "🎖️",
+        "KI Coach": "🤖", "Statistiken": "📊", "Einstellungen": "⚙️",
+    }
+    page = st.sidebar.selectbox(
+        "Navigation", PAGES,
+        index=PAGES.index(st.session_state.page),
+        format_func=lambda p: f"{_PAGE_ICONS.get(p, '·')}  {p}",
+        label_visibility="collapsed"
+    )
     st.session_state.page = page
 
-    # Fokus-Modus übernimmt die gesamte Hauptfläche
+    # ── Fokus-Modus ───────────────────────────────────────────
     if st.session_state.get('focus_task_id') and st.session_state.get('focus_phase'):
         _render_focus_mode()
-        # Sidebar trotzdem rendern (Punkte etc.)
         level, progress, goal = get_level_and_progress()
-        st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
-        st.sidebar.progress(int(progress / goal * 100))
+        st.sidebar.markdown(f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:10px;padding:10px 12px;
+            border:1px solid rgba(255,255,255,0.1);text-align:center">
+  <div style="font-size:13px;color:rgba(255,255,255,0.6)">Level {level}</div>
+  <div style="font-size:18px;font-weight:800;color:#00d4ff">{total_points()} Pts</div>
+</div>""", unsafe_allow_html=True)
         return
 
     if page == "Start":
@@ -5760,7 +5785,7 @@ def main():
     elif page == "Einstellungen":
         render_settings_page()
 
-    # Mini-Charakter in Sidebar
+    # ── Charakter / Score Card ─────────────────────────────────
     rpg_char = get_character()
     if rpg_char and rpg_char.get('class_id'):
         c_level, c_xp, c_xp_next = compute_level(rpg_char['total_xp'])
@@ -5768,50 +5793,96 @@ def main():
         c_ci = CLASS_INFO.get(rpg_char.get('class_id', ''), {})
         c_col = c_ci.get('color', '#00d4ff')
         c_body = _get_char_body(c_level, rpg_char.get('class_id', ''), rpg_char.get('equipped_body', ''))
-        st.sidebar.markdown(f"""<div style="background:rgba(255,255,255,0.05);border-radius:12px;
-          padding:10px 12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.1)">
-          <div style="display:flex;align-items:center;gap:10px">
-            <div style="font-size:34px;filter:drop-shadow(0 0 8px {c_col})">{c_body}</div>
-            <div style="flex:1;min-width:0">
-              <div style="font-weight:700;color:white;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{rpg_char['name']}</div>
-              <div style="font-size:11px;color:{c_col};font-weight:600">Level {c_level} · 💰 {rpg_char['coins']}</div>
-              <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:5px;margin-top:5px;overflow:hidden">
-                <div style="width:{c_pct}%;height:100%;border-radius:4px;background:{c_col};box-shadow:0 0 6px {c_col}88"></div>
-              </div>
-              <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px">{c_xp}/{c_xp_next} XP</div>
-            </div>
-          </div>
-        </div>""", unsafe_allow_html=True)
+        st.sidebar.markdown(f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:12px;
+  padding:10px 12px;margin:8px 0;border:1px solid rgba(255,255,255,0.1)">
+  <div style="display:flex;align-items:center;gap:10px">
+    <div style="font-size:32px;filter:drop-shadow(0 0 8px {c_col})">{c_body}</div>
+    <div style="flex:1;min-width:0">
+      <div style="font-weight:700;color:white;font-size:13px;white-space:nowrap;
+                  overflow:hidden;text-overflow:ellipsis">{rpg_char['name']}</div>
+      <div style="font-size:10px;color:{c_col};font-weight:600;margin-top:1px">
+        Level {c_level} · 💰 {rpg_char['coins']}</div>
+      <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:4px;
+                  margin-top:5px;overflow:hidden">
+        <div style="width:{c_pct}%;height:100%;border-radius:4px;background:{c_col};
+                    box-shadow:0 0 6px {c_col}88"></div>
+      </div>
+      <div style="font-size:9px;color:rgba(255,255,255,0.28);margin-top:2px">
+        {c_xp}/{c_xp_next} XP</div>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
     else:
         level, progress, goal = get_level_and_progress()
-        st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
-        st.sidebar.progress(int(progress / goal * 100))
+        pct_lvl = int(progress / goal * 100) if goal > 0 else 0
+        st.sidebar.markdown(f"""
+<div style="background:rgba(255,255,255,0.05);border-radius:12px;
+  padding:10px 12px;margin:8px 0;border:1px solid rgba(255,255,255,0.1)">
+  <div style="font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1px">LEVEL {level}</div>
+  <div style="font-size:20px;font-weight:800;color:#00d4ff">{total_points()} Pts</div>
+  <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:4px;margin-top:6px;overflow:hidden">
+    <div style="width:{pct_lvl}%;height:100%;background:#00d4ff;border-radius:4px"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
 
-    st.sidebar.header("Quick Actions")
-    with st.sidebar.expander("Punkte & Level"):
+    # ── Heute Schnellübersicht ─────────────────────────────────
+    _today_str = date.today().isoformat()
+    _conn = sqlite3.connect(DB_PATH)
+    _cc = _conn.cursor()
+    _cc.execute("SELECT COUNT(*), COALESCE(SUM(done),0) FROM entries WHERE entry_date=?", (_today_str,))
+    _t_total, _t_done = _cc.fetchone()
+    _t_done = _t_done or 0
+    _cc.execute("SELECT COALESCE(SUM(points),0) FROM entries WHERE entry_date=? AND done=1", (_today_str,))
+    _pts_today = _cc.fetchone()[0] or 0
+    _conn.close()
+    _pct_day = int(_t_done / _t_total * 100) if _t_total else 0
+    _bar_col = "#e74c3c" if _pct_day < 30 else "#f39c12" if _pct_day < 65 else "#2ecc71"
+    st.sidebar.markdown(f"""
+<div style="background:rgba(255,255,255,0.03);border-radius:10px;padding:9px 12px;
+            margin-bottom:6px;border:1px solid rgba(255,255,255,0.06)">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+    <span style="font-size:9px;color:rgba(255,255,255,0.4);font-weight:700;
+                 letter-spacing:1.5px;text-transform:uppercase">Heute</span>
+    <span style="font-size:11px;color:#ffd700;font-weight:700">⚡ {_pts_today} Pts</span>
+  </div>
+  <div style="background:rgba(255,255,255,0.08);border-radius:3px;height:3px;overflow:hidden">
+    <div style="width:{_pct_day}%;height:100%;background:{_bar_col};border-radius:3px"></div>
+  </div>
+  <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:3px">
+    {_t_done} / {_t_total} Aufgaben · {_pct_day}%</div>
+</div>""", unsafe_allow_html=True)
+
+    st.sidebar.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+    # ── Einstellungen & Tools ──────────────────────────────────
+    with st.sidebar.expander("⚙️  Punkte & Level"):
         pts_input = st.number_input("Punkte pro Aufgabe",
                                      value=int(get_setting('points_per_task') or POINTS_PER_TASK), min_value=1)
         lvl_input = st.number_input("Punkte pro Level",
                                      value=int(get_setting('level_step') or LEVEL_STEP), min_value=10)
-        if st.button("Speichern"):
-            set_setting('points_per_task', pts_input)
-            set_setting('level_step', lvl_input)
-            st.sidebar.success("Gespeichert.")
-        if st.button("Zurücksetzen"):
-            set_setting('points_per_task', POINTS_PER_TASK)
-            set_setting('level_step', LEVEL_STEP)
-            st.sidebar.success("Zurückgesetzt.")
+        _c1, _c2 = st.columns(2)
+        with _c1:
+            if st.button("Speichern", use_container_width=True):
+                set_setting('points_per_task', pts_input)
+                set_setting('level_step', lvl_input)
+                st.success("✓")
+        with _c2:
+            if st.button("Reset", use_container_width=True):
+                set_setting('points_per_task', POINTS_PER_TASK)
+                set_setting('level_step', LEVEL_STEP)
+                st.success("✓")
 
-    with st.sidebar.expander("Export / Sync"):
+    with st.sidebar.expander("☁️  Export / Sync"):
         if st.checkbox("GitHub Gist"):
             token = st.text_input("Token", type="password")
             gist_id = st.text_input("Gist ID (leer → neu)")
-            if st.button("Exportieren"):
-                conn = sqlite3.connect(DB_PATH)
-                c = conn.cursor()
-                c.execute('SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, deadline FROM entries')
-                allrows = c.fetchall()
-                conn.close()
+            if st.button("Exportieren", use_container_width=True):
+                conn2 = sqlite3.connect(DB_PATH)
+                c2 = conn2.cursor()
+                c2.execute('SELECT id, entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, done, completed_at, elapsed_seconds, deadline FROM entries')
+                allrows = c2.fetchall()
+                conn2.close()
                 payload = json.dumps([dict(id=r[0], type=r[1], content=r[2], tags=r[3],
                                             priority=r[4], estimate=r[5], points=r[6],
                                             created_at=r[7], entry_date=r[8], done=r[9],
@@ -5827,22 +5898,29 @@ def main():
                     st.download_button("Download JSON", data=payload,
                                         file_name=f"kaizen_{date.today().isoformat()}.json")
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Daten")
-    if st.sidebar.button("Beispieldaten einfügen"):
-        insert_sample_data()
-        st.sidebar.success("Eingefügt.")
-    if st.sidebar.button("Beispieldaten löschen"):
-        delete_sample_data()
-        st.sidebar.success("Gelöscht.")
-    with st.sidebar.expander("⚠️ Alle Daten löschen"):
-        confirm = st.text_input("Gib DELETE ein")
-        if st.button("Löschen") and confirm == "DELETE":
+    with st.sidebar.expander("🗄️  Datenverwaltung"):
+        _db1, _db2 = st.columns(2)
+        with _db1:
+            if st.button("Beispiele +", use_container_width=True):
+                insert_sample_data()
+                st.success("✓")
+        with _db2:
+            if st.button("Beispiele −", use_container_width=True):
+                delete_sample_data()
+                st.success("✓")
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        _del_confirm = st.text_input("⚠️ Alle Daten löschen — tippe DELETE")
+        if st.button("Alles löschen", type="secondary", use_container_width=True) and _del_confirm == "DELETE":
             delete_all_data()
-            st.sidebar.success("Alle Daten gelöscht.")
+            st.success("Gelöscht.")
 
-    st.sidebar.markdown("---")
-    st.sidebar.caption("Tipp: Daily Highlight = eine Priorität. Deadline = künstlicher Druck.")
+    # ── Footer ────────────────────────────────────────────────
+    st.sidebar.markdown("""
+<div style="margin-top:16px;padding:10px 0;border-top:1px solid rgba(255,255,255,0.07);
+            text-align:center">
+  <div style="font-size:9px;color:rgba(255,255,255,0.2);letter-spacing:1px">
+    一日一善 · jeden Tag ein bisschen besser</div>
+</div>""", unsafe_allow_html=True)
 
 
 if __name__ == '__main__':
