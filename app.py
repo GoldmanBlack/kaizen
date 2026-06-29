@@ -2228,99 +2228,123 @@ JSON-Format:
 
 
 def _build_tagesfokus_hero(done_count, total, pts_today, today_label):
-    pct      = done_count / total if total > 0 else 0
-    pct_int  = int(pct * 100)
-    r        = 80
-    circ     = 2 * 3.14159 * r   # ~502.65
-    offset   = circ * (1 - pct)
+    pct     = done_count / total if total > 0 else 0
+    pct_int = int(pct * 100)
+    R       = 90
+    cx = cy = 110
+    circ    = 2 * 3.14159265 * R   # 565.49
+    offset  = circ * (1 - pct)
 
     if pct < 0.3:
-        c1, c2, glow_col = "#e74c3c", "#c0392b", "rgba(231,76,60,0.55)"
+        c1, c2, glow = "#ff4757", "#ff6b81", "rgba(255,71,87,0.6)"
     elif pct < 0.6:
-        c1, c2, glow_col = "#f39c12", "#e67e22", "rgba(243,156,18,0.55)"
+        c1, c2, glow = "#ffa502", "#ffcc02", "rgba(255,165,2,0.6)"
     elif pct < 0.9:
-        c1, c2, glow_col = "#2ecc71", "#00d4ff", "rgba(46,204,113,0.55)"
+        c1, c2, glow = "#2ed573", "#00d4ff", "rgba(46,213,115,0.6)"
     else:
-        c1, c2, glow_col = "#00d4ff", "#a29bfe", "rgba(0,212,255,0.7)"
+        c1, c2, glow = "#00d4ff", "#a29bfe", "rgba(0,212,255,0.75)"
 
-    sparkles = ""
+    # Tip-dot position at arc end
+    import math as _m
+    angle = -_m.pi / 2 + pct * 2 * _m.pi
+    tip_x = cx + R * _m.cos(angle)
+    tip_y = cy + R * _m.sin(angle)
+    tip_visible = "visible" if pct > 0.01 else "hidden"
+
+    sparkle_html = ""
     if pct >= 0.99:
-        sparkles = """
-        <div class="sparks">
-          <span>✦</span><span>✦</span><span>✦</span>
-          <span>✦</span><span>✦</span><span>✦</span>
-        </div>"""
+        sparkle_html = "".join(
+            f'<div class="spark" style="--dx:{dx}px;--dy:{dy}px;--d:{d}s"></div>'
+            for dx, dy, d in [(-60,-40,.0),( 60,-40,.2),(-80, 10,.4),
+                               ( 80, 10,.6),(-40, 60,.8),( 40, 60,1.0)]
+        )
 
     return f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 *{{margin:0;padding:0;box-sizing:border-box}}
-html,body{{background:transparent;font-family:-apple-system,sans-serif;overflow:hidden;height:100%;margin:0;padding:0}}
-.hero{{display:flex;align-items:center;justify-content:center;gap:40px;padding:16px 28px;min-height:260px}}
-.ring-wrap{{position:relative;width:200px;height:200px;flex-shrink:0}}
-svg.ring{{width:200px;height:200px;transform:rotate(-90deg)}}
-.ring-track{{fill:none;stroke:rgba(255,255,255,0.06);stroke-width:14;stroke-linecap:round}}
-.ring-fill{{fill:none;stroke:url(#grad);stroke-width:14;stroke-linecap:round;
-  stroke-dasharray:{circ:.1f};stroke-dashoffset:{offset:.1f};
-  filter:drop-shadow(0 0 8px {glow_col});
-  transition:stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1)}}
-@keyframes pulse-glow{{0%,100%{{filter:drop-shadow(0 0 8px {glow_col})}}
-  50%{{filter:drop-shadow(0 0 18px {glow_col}) drop-shadow(0 0 32px {c1})}}}}
-.ring-fill{{animation:pulse-glow 2.4s ease-in-out infinite}}
-.center-text{{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
-  text-align:center;pointer-events:none}}
-.pct-num{{font-size:42px;font-weight:900;letter-spacing:-2px;
-  background:linear-gradient(135deg,{c1},{c2});
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
-  background-clip:text}}
-.pct-label{{font-size:11px;color:rgba(255,255,255,.35);font-weight:600;letter-spacing:1px;margin-top:-4px}}
-.stats{{display:flex;flex-direction:column;gap:12px}}
-.stat-pill{{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);
-  border-radius:14px;padding:10px 22px;min-width:140px}}
-.stat-val{{font-size:28px;font-weight:800;
+html,body{{background:#0e1117;font-family:-apple-system,'Segoe UI',sans-serif;overflow:hidden;height:100%}}
+.hero{{display:flex;align-items:center;justify-content:center;gap:52px;height:100%;padding:0 32px}}
+
+/* Ring */
+.rw{{position:relative;width:220px;height:220px;flex-shrink:0}}
+svg{{width:220px;height:220px;overflow:visible}}
+.track{{fill:none;stroke:rgba(255,255,255,0.05);stroke-width:16}}
+.arc{{fill:none;stroke:url(#g);stroke-width:16;stroke-linecap:round;
+  stroke-dasharray:{circ:.2f};stroke-dashoffset:{circ:.2f};
+  filter:drop-shadow(0 0 10px {glow});
+  animation:fill-in 1.5s cubic-bezier(.22,1,.36,1) forwards,
+             breathe 3s ease-in-out 1.5s infinite}}
+@keyframes fill-in{{to{{stroke-dashoffset:{offset:.2f}}}}}
+@keyframes breathe{{
+  0%,100%{{filter:drop-shadow(0 0 8px {glow})}}
+  50%{{filter:drop-shadow(0 0 20px {glow}) drop-shadow(0 0 40px {c1}44)}}}}
+
+/* Tip glow dot */
+.tip{{position:absolute;width:14px;height:14px;border-radius:50%;
+  background:{c1};visibility:{tip_visible};
+  box-shadow:0 0 0 3px #0e1117,0 0 14px {c1},0 0 28px {c1}88;
+  transform:translate(-50%,-50%);
+  left:{tip_x/220*100:.2f}%;top:{tip_y/220*100:.2f}%;
+  animation:tip-pulse 1.8s ease-in-out infinite}}
+@keyframes tip-pulse{{0%,100%{{box-shadow:0 0 0 3px #0e1117,0 0 12px {c1},0 0 24px {c1}66}}
+  50%{{box-shadow:0 0 0 3px #0e1117,0 0 20px {c1},0 0 40px {c1}}}}}
+
+/* Center text */
+.ct{{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center}}
+.pct{{font-size:50px;font-weight:900;letter-spacing:-3px;line-height:1;
+  background:linear-gradient(145deg,{c1},{c2});
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
+.sub{{font-size:10px;font-weight:700;letter-spacing:3px;color:rgba(255,255,255,.25);margin-top:2px}}
+
+/* Stats */
+.stats{{display:flex;flex-direction:column;gap:14px}}
+.card{{position:relative;background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.07);
+  border-left:3px solid {c1};
+  border-radius:14px;padding:14px 28px;min-width:160px;overflow:hidden}}
+.card::before{{content:'';position:absolute;inset:0;
+  background:linear-gradient(135deg,{c1}08,transparent 60%);pointer-events:none}}
+.cv{{font-size:36px;font-weight:900;line-height:1;
   background:linear-gradient(135deg,{c1},{c2});
   -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}}
-.stat-key{{font-size:11px;color:rgba(255,255,255,.4);font-weight:600;letter-spacing:.8px;margin-top:1px}}
-.date-label{{font-size:12px;color:rgba(255,255,255,.3);margin-top:10px;letter-spacing:.5px}}
-.sparks{{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none}}
-.sparks span{{position:absolute;font-size:18px;animation:float-spark 1.8s ease-in-out infinite;
-  color:{c1};text-shadow:0 0 10px {c1}}}
-.sparks span:nth-child(1){{top:5%;left:50%;animation-delay:0s}}
-.sparks span:nth-child(2){{top:15%;left:80%;animation-delay:.3s}}
-.sparks span:nth-child(3){{top:15%;left:20%;animation-delay:.6s}}
-.sparks span:nth-child(4){{top:75%;left:10%;animation-delay:.9s}}
-.sparks span:nth-child(5){{top:75%;left:85%;animation-delay:1.2s}}
-.sparks span:nth-child(6){{top:90%;left:50%;animation-delay:1.5s}}
-@keyframes float-spark{{0%{{transform:translateY(0) scale(1);opacity:.8}}
-  50%{{transform:translateY(-18px) scale(1.3);opacity:1}}
-  100%{{transform:translateY(0) scale(1);opacity:.8}}}}
+.ck{{font-size:9px;font-weight:700;letter-spacing:2px;color:rgba(255,255,255,.3);margin-top:4px}}
+
+/* Sparkles at 100% */
+.spark{{position:absolute;width:6px;height:6px;border-radius:50%;
+  background:{c1};box-shadow:0 0 8px {c1};
+  top:50%;left:50%;
+  animation:spark-out 1.6s ease-out var(--d) infinite}}
+@keyframes spark-out{{
+  0%{{transform:translate(0,0) scale(1);opacity:1}}
+  100%{{transform:translate(var(--dx),var(--dy)) scale(0);opacity:0}}}}
 </style></head><body>
 <div class="hero">
-  <div class="ring-wrap">
-    <svg class="ring" viewBox="0 0 200 200">
+  <div class="rw">
+    <svg viewBox="0 0 220 220">
       <defs>
-        <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" style="stop-color:{c1}"/>
-          <stop offset="100%" style="stop-color:{c2}"/>
+        <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
+          <stop offset="0%" stop-color="{c1}"/>
+          <stop offset="100%" stop-color="{c2}"/>
         </linearGradient>
       </defs>
-      <circle class="ring-track" cx="100" cy="100" r="{r}"/>
-      <circle class="ring-fill" cx="100" cy="100" r="{r}"/>
+      <circle class="track" cx="{cx}" cy="{cy}" r="{R}" transform="rotate(-90,{cx},{cy})"/>
+      <circle class="arc"   cx="{cx}" cy="{cy}" r="{R}" transform="rotate(-90,{cx},{cy})"/>
     </svg>
-    <div class="center-text">
-      <div class="pct-num">{pct_int}%</div>
-      <div class="pct-label">ERLEDIGT</div>
+    <div class="tip"></div>
+    <div class="ct">
+      <div class="pct">{pct_int}%</div>
+      <div class="sub">ERLEDIGT</div>
     </div>
-    {sparkles}
+    {sparkle_html}
   </div>
   <div class="stats">
-    <div class="stat-pill">
-      <div class="stat-val">{done_count}<span style="font-size:16px;opacity:.5"> /{total}</span></div>
-      <div class="stat-key">AUFGABEN</div>
+    <div class="card">
+      <div class="cv">{done_count}<span style="font-size:20px;opacity:.4">/{total}</span></div>
+      <div class="ck">AUFGABEN</div>
     </div>
-    <div class="stat-pill">
-      <div class="stat-val">{pts_today}</div>
-      <div class="stat-key">PUNKTE HEUTE</div>
+    <div class="card">
+      <div class="cv">{pts_today}</div>
+      <div class="ck">PUNKTE HEUTE</div>
     </div>
-    <div class="date-label">{today_label}</div>
   </div>
 </div>
 </body></html>"""
@@ -3676,8 +3700,7 @@ def render_tagesfokus_page():
 
     t_col, b_col = st.columns([0.85, 0.15])
     with t_col:
-        st.title("Tagesfokus")
-        st.caption(today_label)
+        st.title(f"Tagesfokus · {today_label}")
     with b_col:
         st.write("")
         if st.button("← Planen", key="fok_back"):
@@ -3692,7 +3715,7 @@ def render_tagesfokus_page():
 
     components.html(
         _build_tagesfokus_hero(done_count, total, pts_today, today_label),
-        height=270
+        height=240
     )
     st.markdown("---")
 
@@ -5016,9 +5039,9 @@ def render_settings_page():
             with st.spinner("Sichere..."):
                 ok = auto_backup_db()
             if ok:
-                st.success("✅ Gesichert!")
+                st.rerun()
             else:
-                st.error("Fehler — Token/Gist prüfen.")
+                st.error("Fehler — Token hinterlegen und speichern, dann nochmal.")
 
     with st.expander("🔧 Backup einrichten"):
         st.markdown("""
