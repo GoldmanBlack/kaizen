@@ -4104,62 +4104,212 @@ def render_tagesfokus_page():
 
 def render_alle_eintraege_page():
     st.markdown(URGENCY_CSS, unsafe_allow_html=True)
-    st.title("Alle Einträge")
+    st.title("Aufgaben-Kalender")
 
     all_rows = get_all_entries()
     if not all_rows:
         st.info("Noch keine Einträge — starte mit dem Tag planen.")
         return
 
+    today      = date.today()
+    categories = get_categories()
+    cat_map    = {c['id']: c for c in categories}
+
+    # ── Controls ────────────────────────────────────────────────
+    fc1, fc2, fc3 = st.columns([1, 1, 1])
+    with fc1:
+        type_filter = st.selectbox("Typ", ["Alle", "Highlight", "To-Do"], key="ae_type",
+                                   label_visibility="collapsed")
+    with fc2:
+        range_filter = st.selectbox("Zeitraum", ["Nächste 14 Tage", "Nächste 30 Tage",
+                                                   "Vergangene 7 Tage", "Alles"], key="ae_range",
+                                    label_visibility="collapsed")
+    with fc3:
+        show_done = st.toggle("Erledigte zeigen", value=False, key="ae_show_done")
+
+    # Build date range
+    if range_filter == "Nächste 14 Tage":
+        date_from = today
+        date_to   = today + timedelta(days=14)
+    elif range_filter == "Nächste 30 Tage":
+        date_from = today
+        date_to   = today + timedelta(days=30)
+    elif range_filter == "Vergangene 7 Tage":
+        date_from = today - timedelta(days=7)
+        date_to   = today
+    else:
+        date_from = date(2020, 1, 1)
+        date_to   = today + timedelta(days=365)
+
     # Filter
-    col_f1, col_f2, col_f3 = st.columns([1, 1, 1])
-    with col_f1:
-        show_filter = st.selectbox("Anzeigen", ["Alle", "Offen", "Erledigt"], key="ae_filter")
-    with col_f2:
-        type_filter = st.selectbox("Typ", ["Alle", "highlight", "micro", "brain"], key="ae_type")
-    with col_f3:
-        sort_by = st.selectbox("Sortierung", ["Deadline ↑", "Erstellt ↓", "Datum"], key="ae_sort")
+    def _passes(r):
+        if not show_done and r[9]:
+            return False
+        try:
+            d = date.fromisoformat(r[8])
+        except Exception:
+            return False
+        if not (date_from <= d <= date_to):
+            return False
+        if type_filter == "Highlight" and r[1] != "highlight":
+            return False
+        if type_filter == "To-Do" and r[1] not in ("brain", "micro"):
+            return False
+        return True
 
-    # Apply filters
-    filtered = all_rows
-    if show_filter == "Offen":
-        filtered = [r for r in filtered if not r[9]]
-    elif show_filter == "Erledigt":
-        filtered = [r for r in filtered if r[9]]
-    if type_filter != "Alle":
-        filtered = [r for r in filtered if r[1] == type_filter]
+    filtered = [r for r in all_rows if _passes(r)]
 
-    # Sort
-    if sort_by == "Deadline ↑":
-        filtered = sorted(filtered, key=lambda r: get_urgency(r[13])[1])
-    elif sort_by == "Erstellt ↓":
-        pass  # already ordered by id DESC
-    elif sort_by == "Datum":
-        filtered = sorted(filtered, key=lambda r: r[8], reverse=True)
+    # Group by date
+    from collections import defaultdict as _dd
+    by_date = _dd(list)
+    for r in filtered:
+        by_date[r[8]].append(r)
 
-    st.caption(f"{len(filtered)} Einträge")
+    # Stats bar
+    open_count = sum(1 for r in filtered if not r[9])
+    done_count = sum(1 for r in filtered if r[9])
+    days_shown = len(by_date)
+    sc1, sc2, sc3, sc4 = st.columns(4)
+    sc1.metric("Tage", days_shown)
+    sc2.metric("Offen", open_count)
+    sc3.metric("Erledigt", done_count)
+    sc4.metric("Gesamt", len(filtered))
     st.markdown("---")
 
-    # Group by urgency when sorting by deadline
-    if sort_by == "Deadline ↑":
-        groups = [
-            ("overdue",  "🔴 Überfällig"),
-            ("today",    "🟠 Heute"),
-            ("tomorrow", "🟡 Morgen"),
-            ("soon",     "🟢 Bald (2–3 Tage)"),
-            ("later",    "📅 Später"),
-            ("none",     "📋 Kein Termin"),
-        ]
-        for g_key, g_label in groups:
-            group_rows = [r for r in filtered if get_urgency(r[13])[0] == g_key]
-            if not group_rows:
-                continue
-            st.markdown(f"#### {g_label}")
-            for r in group_rows:
-                _render_entry_card(r)
-    else:
-        for r in filtered:
-            _render_entry_card(r)
+    if not by_date:
+        st.info("Keine offenen Aufgaben im gewählten Zeitraum.")
+        return
+
+    TYPE_ICONS = {"highlight": "⭐", "brain": "📋", "micro": "⚡"}
+    TYPE_COLORS = {"highlight": "#ffd700", "brain": "#00d4ff", "micro": "#a29bfe"}
+
+    for day_str in sorted(by_date.keys()):
+        day_rows = by_date[day_str]
+        try:
+            d = date.fromisoformat(day_str)
+        except Exception:
+            continue
+
+        open_n = sum(1 for r in day_rows if not r[9])
+        done_n = sum(1 for r in day_rows if r[9])
+        pct    = done_n / len(day_rows) if day_rows else 0
+        bar_w  = int(pct * 100)
+
+        # Day label styling
+        is_today    = d == today
+        is_tomorrow = d == today + timedelta(days=1)
+        is_past     = d < today
+        if is_today:
+            day_color = "#00d4ff"
+            day_badge = '<span style="background:#00d4ff22;color:#00d4ff;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:8px">HEUTE</span>'
+        elif is_tomorrow:
+            day_color = "#a29bfe"
+            day_badge = '<span style="background:#a29bfe22;color:#a29bfe;font-size:10px;font-weight:700;padding:2px 8px;border-radius:6px;margin-left:8px">MORGEN</span>'
+        elif is_past:
+            day_color = "rgba(255,255,255,0.2)"
+            day_badge = ""
+        else:
+            days_from_today = (d - today).days
+            day_color = "#636e72"
+            day_badge = f'<span style="font-size:10px;color:rgba(255,255,255,.3);margin-left:8px">in {days_from_today}d</span>'
+
+        wday = WOCHENTAGE[d.weekday()]
+        month = MONATE[d.month - 1]
+
+        # Day header
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:12px;margin:20px 0 8px 0">'
+            f'<div style="background:{day_color}22;border:1px solid {day_color}44;border-radius:10px;'
+            f'padding:8px 14px;min-width:72px;text-align:center">'
+            f'<div style="font-size:22px;font-weight:900;color:{day_color};line-height:1">{d.day}</div>'
+            f'<div style="font-size:9px;font-weight:700;letter-spacing:1px;color:{day_color};opacity:.7">{wday[:2].upper()}</div>'
+            f'</div>'
+            f'<div style="flex:1">'
+            f'<div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.7)">{wday}, {d.day}. {month}{day_badge}</div>'
+            f'<div style="margin-top:5px;background:rgba(255,255,255,.07);border-radius:4px;height:4px">'
+            f'<div style="background:linear-gradient(90deg,{day_color},{day_color}99);width:{bar_w}%;height:4px;border-radius:4px"></div>'
+            f'</div>'
+            f'<div style="font-size:10px;color:rgba(255,255,255,.3);margin-top:3px">{done_n}/{len(day_rows)} erledigt</div>'
+            f'</div></div>',
+            unsafe_allow_html=True
+        )
+
+        # Task cards for this day
+        open_rows = [r for r in day_rows if not r[9]]
+        done_rows = [r for r in day_rows if r[9]]
+
+        for r in open_rows:
+            eid, etype, content, tags, priority, estimate, points, created_at, entry_date, \
+                done, completed_at, elapsed_seconds, started_at, deadline, micro_action, category_id = r
+            cat      = cat_map.get(category_id)
+            t_color  = TYPE_COLORS.get(etype, "#636e72")
+            t_icon   = TYPE_ICONS.get(etype, "•")
+            urg_level, urg_days, urg_label, _ = get_urgency(deadline)
+            cat_html = (f'<span style="background:{cat["color"]}22;color:{cat["color"]};'
+                        f'font-size:10px;font-weight:700;padding:1px 7px;border-radius:6px;'
+                        f'border:1px solid {cat["color"]}44;margin-left:4px">{cat["icon"]} {cat["name"]}</span>'
+                        if cat else "")
+            urg_html = (f'<span style="font-size:10px;color:#e74c3c;font-weight:700;margin-left:6px">⚠ {urg_label}</span>'
+                        if urg_label else "")
+            micro_html = (f'<div style="font-size:11px;color:#00ff88;margin-top:3px">⚡ {micro_action}</div>'
+                          if micro_action else "")
+
+            st.markdown(
+                f'<div style="display:flex;align-items:flex-start;gap:10px;'
+                f'padding:10px 14px;margin:3px 0;'
+                f'background:rgba(255,255,255,0.03);border-radius:10px;'
+                f'border-left:3px solid {t_color}">'
+                f'<span style="font-size:16px;margin-top:1px">{t_icon}</span>'
+                f'<div style="flex:1">'
+                f'<div style="font-size:13px;font-weight:600;color:rgba(255,255,255,.9)">{content}'
+                f'{cat_html}{urg_html}</div>'
+                f'{micro_html}'
+                f'{"<div style=\'font-size:10px;color:rgba(255,255,255,.3);margin-top:2px\'>⏱️ " + str(estimate) + " min</div>" if estimate else ""}'
+                f'</div></div>',
+                unsafe_allow_html=True
+            )
+            cb, bstart, _ = st.columns([0.06, 0.14, 0.80])
+            with cb:
+                if st.checkbox("", value=False, key=f"ae_chk_{eid}", label_visibility="collapsed"):
+                    elapsed = 0
+                    if started_at:
+                        try:
+                            sa = datetime.fromisoformat(started_at)
+                            elapsed = int((datetime.utcnow() - sa).total_seconds())
+                        except Exception:
+                            pass
+                    toggle_done(eid, True, elapsed_seconds=elapsed,
+                                points=compute_points(elapsed, estimate))
+                    st.rerun()
+            with bstart:
+                if st.button("Stop & ✓" if started_at else "▶ Start",
+                             key=f"ae_ss_{eid}", use_container_width=True):
+                    if started_at:
+                        elapsed = 0
+                        try:
+                            sa = datetime.fromisoformat(started_at)
+                            elapsed = int((datetime.utcnow() - sa).total_seconds())
+                        except Exception:
+                            pass
+                        toggle_done(eid, True, elapsed_seconds=elapsed,
+                                    points=compute_points(elapsed, estimate))
+                    else:
+                        start_task(eid)
+                    st.rerun()
+
+        if done_rows and show_done:
+            for r in done_rows:
+                eid, etype, content = r[0], r[1], r[2]
+                t_icon = TYPE_ICONS.get(etype, "•")
+                st.markdown(
+                    f'<div style="display:flex;align-items:center;gap:10px;padding:6px 14px;'
+                    f'margin:2px 0;opacity:.28;text-decoration:line-through;'
+                    f'border-radius:8px">'
+                    f'<span style="font-size:14px">{t_icon}</span>'
+                    f'<span style="font-size:12px">{content}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
 
 
 def _render_entry_card(r):
