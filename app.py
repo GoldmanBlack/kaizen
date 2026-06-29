@@ -2251,10 +2251,14 @@ def render_planen_page():
     has_highlight = any(r[1] == "highlight" for r in rows)
     # Micro is now attached to the highlight's micro_action field
     today_highlight = next((r for r in rows if r[1] == "highlight"), None)
-    has_micro     = bool(today_highlight and today_highlight[14])
-    steps_done    = sum([has_brain, has_highlight, has_micro])
+    has_micro       = bool(today_highlight and today_highlight[14])
+    brain_rows      = [r for r in rows if r[1] == "brain"]
+    # Step 4 is "ready" when all brain tasks have at least a category or micro
+    has_todo_setup  = bool(brain_rows) and all(r[14] or r[15] for r in brain_rows)
+    steps_done      = sum([has_brain, has_highlight, has_micro])
+    total_steps     = 4
 
-    st.progress(steps_done / 3, text=f"Schritt {steps_done} von 3 abgeschlossen")
+    st.progress(steps_done / total_steps, text=f"Schritt {steps_done} von {total_steps} abgeschlossen")
 
     if steps_done >= 1:
         _, btn_col, _ = st.columns([0.35, 0.30, 0.35])
@@ -2320,15 +2324,86 @@ def render_planen_page():
                     value=current_micro or "",
                     placeholder="z.B. Dokument öffnen, E-Mail schreiben, Notiz anlegen..."
                 )
-                if st.form_submit_button("Speichern & Fokus starten"):
+                if st.form_submit_button("Speichern"):
                     if micro.strip() and today_highlight:
                         conn_mc = sqlite3.connect(DB_PATH)
                         conn_mc.execute("UPDATE entries SET micro_action=? WHERE id=?",
                                         (micro.strip(), today_highlight[0]))
                         conn_mc.commit()
                         conn_mc.close()
-                        st.session_state.page = "Tagesfokus"
                         st.rerun()
+
+    # ── Step 4: To-Do Liste einrichten ────────────────────────────
+    todo_count   = len(brain_rows)
+    setup_count  = sum(1 for r in brain_rows if r[14] or r[15])
+    if has_todo_setup:
+        step4_label = f"✅ To-Do Liste eingerichtet ({todo_count} Aufgaben)"
+    elif brain_rows:
+        step4_label = f"4️⃣  To-Do Liste einrichten ({setup_count}/{todo_count} bereit)"
+    else:
+        step4_label = "4️⃣  To-Do Liste einrichten"
+
+    with st.expander(step4_label, expanded=has_micro and not has_todo_setup and bool(brain_rows)):
+        if not brain_rows:
+            st.info("Noch keine Aufgaben im Brain Dump — füge sie in Schritt 1 hinzu.")
+        else:
+            categories = get_categories()
+            cat_opts   = ["— keine —"] + [f"{c['icon']} {c['name']}" for c in categories]
+            st.caption("Für jede Aufgabe: Kategorie wählen und 2-min Starter setzen.")
+            for r in brain_rows:
+                eid       = r[0]
+                content   = r[2]
+                micro_val = r[14] or ""
+                cat_id    = r[15]
+                cat       = next((c for c in categories if c['id'] == cat_id), None)
+
+                cat_html = (f'<span style="background:{cat["color"]}28;color:{cat["color"]};'
+                            f'font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;'
+                            f'border:1px solid {cat["color"]}44">{cat["icon"]} {cat["name"]}</span>'
+                            if cat else '')
+                micro_html = (f'<span style="font-size:11px;color:#00ff88"> · ⚡ {micro_val}</span>'
+                              if micro_val else '')
+                st.markdown(
+                    f'<div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06)">'
+                    f'<strong>{content}</strong> {cat_html}{micro_html}</div>',
+                    unsafe_allow_html=True
+                )
+
+                with st.form(f"pl_todo_{eid}"):
+                    fc1, fc2 = st.columns([1, 1])
+                    with fc1:
+                        cur_idx = 0
+                        if cat:
+                            try:
+                                cur_idx = next(i+1 for i,c in enumerate(categories) if c['id'] == cat_id)
+                            except StopIteration:
+                                pass
+                        sel_cat = st.selectbox("Kategorie", cat_opts, index=cur_idx,
+                                               label_visibility="collapsed",
+                                               key=f"pl_catsel_{eid}")
+                    with fc2:
+                        sel_micro = st.text_input("⚡ Starter (2 min)", value=micro_val,
+                                                   placeholder="z.B. Tab öffnen, Datei suchen...",
+                                                   label_visibility="collapsed",
+                                                   key=f"pl_micro_{eid}")
+                    if st.form_submit_button("Speichern", key=f"pl_save_{eid}", use_container_width=True):
+                        if sel_cat != "— keine —":
+                            chosen = next((c for c in categories if f"{c['icon']} {c['name']}" == sel_cat), None)
+                            if chosen:
+                                set_entry_category(eid, chosen['id'])
+                        else:
+                            set_entry_category(eid, None)
+                        conn_td = sqlite3.connect(DB_PATH)
+                        conn_td.execute("UPDATE entries SET micro_action=? WHERE id=?",
+                                        (sel_micro.strip() or None, eid))
+                        conn_td.commit()
+                        conn_td.close()
+                        st.rerun()
+
+            st.markdown("---")
+            if st.button("✅ Fertig — zum Tagesfokus", key="plan_step4_done", use_container_width=True):
+                st.session_state.page = "Tagesfokus"
+                st.rerun()
 
 
 HABIT_ICONS = ["💧","🏋️","📚","🧘","🏃","✍️","🎯","🍎","😴","💊","🌿","🎵","💻","🙏","❤️","🌞",
