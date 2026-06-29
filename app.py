@@ -14,8 +14,272 @@ DB_PATH = "kaizen.db"
 
 POINTS_PER_TASK = 10
 LEVEL_STEP = 100
+POMODORO_DURATION = 25 * 60
 
 WOCHENTAGE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
+
+CLASS_INFO = {
+    'warrior': {'name': 'Krieger',   'icon': '⚔️',  'bonus_desc': 'Highlight-Quests +25% XP',      'bonus_type': 'highlight', 'bonus_mult': 0.25, 'color': '#e74c3c',
+                'bodies': {1:'🧍', 5:'⚔️', 15:'🥷', 25:'🛡️', 50:'🦸', 100:'🌋'}},
+    'mage':    {'name': 'Magier',    'icon': '🧙',  'bonus_desc': 'Brain-Quests +25% XP',           'bonus_type': 'brain',     'bonus_mult': 0.25, 'color': '#9b59b6',
+                'bodies': {1:'🧍', 5:'📚', 15:'🧙', 25:'🔮', 50:'✨', 100:'🌟'}},
+    'scout':   {'name': 'Späher',    'icon': '🏃',  'bonus_desc': 'Schnelle Quests +35% XP',        'bonus_type': 'speed',     'bonus_mult': 0.35, 'color': '#27ae60',
+                'bodies': {1:'🧍', 5:'🏃', 15:'🏹', 25:'🦅', 50:'⚡', 100:'🌪️'}},
+    'engineer':{'name': 'Ingenieur', 'icon': '⚙️',  'bonus_desc': 'Habits & Micro-Quests +25% XP', 'bonus_type': 'micro',     'bonus_mult': 0.25, 'color': '#3498db',
+                'bodies': {1:'🧍', 5:'🔧', 15:'⚙️', 25:'🤖', 50:'💻', 100:'🛸'}},
+}
+
+RARITY_COLORS = {'common':'#636e72','rare':'#00d4ff','epic':'#9b59b6','legendary':'#ffd700'}
+RARITY_LABELS = {'common':'Gewöhnlich','rare':'Selten','epic':'Episch','legendary':'Legendär'}
+
+# ─── Season exclusive item keys (not shown in regular shop) ──────
+SEASON_EXCLUSIVE_KEYS = {
+    's1_aura_ocean','s1_aura_star','s1_aura_dawn','s1_aura_cosmic','s1_aura_rift',
+    's1_aura_deep','s1_aura_beyond','s1_aura_legend','s1_aura_absolute',
+    's1_body_rise','s1_body_guardian','s1_body_divine',
+    's2_aura_void','s2_aura_night','s2_aura_shadow',
+    's2_body_ghost','s2_body_shade',
+    's3_aura_ember','s3_aura_hellfire',
+    's3_body_fire','s3_body_demon',
+}
+
+SEASON_EXCLUSIVE_ITEMS = [
+    # Season 1 auras
+    ('s1_aura_ocean',   'Ozeantiefen-Aura',    'Exklusiv Season 1: Tiefe des Ozeans',       'cosmetic_aura','🌊',0,'epic',    'aura','ocean_s1',   1,0),
+    ('s1_aura_star',    'Sternstunden-Aura',    'Exklusiv Season 1: Goldener Sternenglanz',  'cosmetic_aura','⭐',0,'epic',    'aura','star_s1',    1,0),
+    ('s1_aura_dawn',    'Dämmerungsfeuer-Aura', 'Exklusiv Season 1: Flammen des Aufbruchs',  'cosmetic_aura','🌅',0,'epic',    'aura','dawn_s1',    1,0),
+    ('s1_aura_cosmic',  'Kosmische Aura',       'Exklusiv Season 1: Kraft des Universums',   'cosmetic_aura','🌌',0,'epic',    'aura','cosmic_s1',  1,0),
+    ('s1_aura_rift',    'Zeitriss-Aura',        'Exklusiv Season 1: Riss in der Realität',   'cosmetic_aura','💎',0,'legendary','aura','rift_s1',   1,0),
+    ('s1_aura_deep',    'Tiefsee-Aura',         'Exklusiv Season 1: Abgrund des Meeres',     'cosmetic_aura','🌊',0,'epic',    'aura','deep_s1',    1,0),
+    ('s1_aura_beyond',  'Jenseitiger Zyklus',   'Exklusiv Season 1: Jenseits der Zeit',      'cosmetic_aura','🔮',0,'legendary','aura','beyond_s1', 1,0),
+    ('s1_aura_legend',  'Legendäre Krönung',    'Exklusiv Season 1: Krönung der Legende',    'cosmetic_aura','🌟',0,'legendary','aura','legend_s1', 1,0),
+    ('s1_aura_absolute','Absolutes Bewusstsein','Exklusiv Season 1: Göttliches Licht',       'cosmetic_aura','✨',0,'legendary','aura','absolute_s1',1,0),
+    ('s1_body_rise',    'Aufstiegs-Rüstung',    'Exklusiv Season 1: Rüstung des Aufstiegs',  'cosmetic_body','🛡️',0,'epic',   'body','rise',        1,0),
+    ('s1_body_guardian','Hüter-Form',            'Exklusiv Season 1: Der ewige Hüter',        'cosmetic_body','🗡️',0,'legendary','body','guardian', 1,0),
+    ('s1_body_divine',  'Göttliche Aufstiegs-Form','Exklusiv S1 Tier 50: Göttlichkeit',      'cosmetic_body','🌟',0,'legendary','body','divine_s1', 1,0),
+    # Season 2 auras
+    ('s2_aura_void',    'Leeren-Aura',          'Exklusiv Season 2: Das Nichts',             'cosmetic_aura','🕳️',0,'epic',    'aura','void_s2',   1,0),
+    ('s2_aura_night',   'Nachtschwärmer-Aura',  'Exklusiv Season 2: Stille der Nacht',       'cosmetic_aura','🌙',0,'epic',    'aura','night_s2',   1,0),
+    ('s2_aura_shadow',  'Schattenriss-Aura',    'Exklusiv Season 2: Grenzen des Schattens',  'cosmetic_aura','🌑',0,'legendary','aura','shadow_s2', 1,0),
+    ('s2_body_ghost',   'Geisterform',          'Exklusiv Season 2: Zwischen den Welten',    'cosmetic_body','👻',0,'epic',   'body','ghost',        1,0),
+    ('s2_body_shade',   'Schatten-Inkarnation', 'Exklusiv Season 2: Verkörperung des Schattens','cosmetic_body','🌑',0,'legendary','body','shade_s2',1,0),
+    # Season 3 auras
+    ('s3_aura_ember',   'Glutkern-Aura',        'Exklusiv Season 3: Glühende Energie',       'cosmetic_aura','🔥',0,'epic',    'aura','ember_s3',   1,0),
+    ('s3_aura_hellfire','Höllenfeuer-Aura',     'Exklusiv Season 3: Feuer der Unterwelt',    'cosmetic_aura','🌋',0,'legendary','aura','hellfire_s3',1,0),
+    ('s3_body_fire',    'Flammenreiter-Form',   'Exklusiv Season 3: Reiter der Flammen',     'cosmetic_body','🔥',0,'epic',   'body','fire_s3',      1,0),
+    ('s3_body_demon',   'Dämonische Inkarnation','Exklusiv Season 3: Dämonen-Tier 50',       'cosmetic_body','😈',0,'legendary','body','demon_s3',  1,0),
+]
+
+def _build_season_pass_data():
+    """Generates 3 season objects each with 50 tiers."""
+    def _tiers(items_50):
+        xp_thresholds = []
+        cumxp = 0
+        for i in range(50):
+            if i < 10:   step = 200
+            elif i < 20: step = 350
+            elif i < 30: step = 550
+            elif i < 40: step = 900
+            else:        step = 1500
+            cumxp += step
+            xp_thresholds.append(cumxp)
+        tiers = []
+        for i, (xp, item) in enumerate(zip(xp_thresholds, items_50)):
+            tiers.append({'tier': i+1, 'xp': xp, **item})
+        return tiers
+
+    S1 = [
+        {'type':'title','icon':'🎖️','name':'Rekrut','value':'Rekrut'},
+        {'type':'coins','icon':'🪙','name':'25 Münzen','value':'25'},
+        {'type':'item', 'icon':'🌊','name':'Ozeantiefen-Aura','value':'s1_aura_ocean'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost','value':'xp_boost_24h'},
+        {'type':'title','icon':'⬆️','name':'Aufsteiger','value':'Aufsteiger'},
+        {'type':'coins','icon':'🪙','name':'40 Münzen','value':'40'},
+        {'type':'item', 'icon':'⭐','name':'Sternstunden-Aura','value':'s1_aura_star'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild','value':'streak_shield'},
+        {'type':'coins','icon':'🪙','name':'60 Münzen','value':'60'},
+        {'type':'item', 'icon':'🌅','name':'Dämmerungsfeuer-Aura','value':'s1_aura_dawn'},
+        {'type':'title','icon':'🏅','name':'Veteran','value':'Veteran'},
+        {'type':'coins','icon':'🪙','name':'80 Münzen','value':'80'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Aufstiegs-Rüstung','value':'s1_body_rise'},
+        {'type':'title','icon':'⚔️','name':'Kämpfer des Lichts','value':'Kämpfer des Lichts'},
+        {'type':'coins','icon':'🪙','name':'100 Münzen','value':'100'},
+        {'type':'item', 'icon':'🌌','name':'Kosmische Aura','value':'s1_aura_cosmic'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💎','name':'Zeitriss-Aura','value':'s1_aura_rift'},
+        {'type':'title','icon':'🌟','name':'Licht-Träger','value':'Licht-Träger'},
+        {'type':'coins','icon':'🪙','name':'150 Münzen','value':'150'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×2','value':'streak_shield'},
+        {'type':'title','icon':'🔮','name':'Meister des Aufstiegs','value':'Meister des Aufstiegs'},
+        {'type':'coins','icon':'🪙','name':'200 Münzen','value':'200'},
+        {'type':'item', 'icon':'🗡️','name':'Hüter-Form','value':'s1_body_guardian'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🌊','name':'Tiefsee-Aura','value':'s1_aura_deep'},
+        {'type':'title','icon':'👑','name':'Held des Aufstiegs','value':'Held des Aufstiegs'},
+        {'type':'coins','icon':'🪙','name':'250 Münzen','value':'250'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🔮','name':'Jenseitiger Zyklus','value':'s1_aura_beyond'},
+        {'type':'title','icon':'🏆','name':'Vollendeter Aufstieg','value':'Vollendeter Aufstieg'},
+        {'type':'coins','icon':'🪙','name':'300 Münzen','value':'300'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×3','value':'streak_shield'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×4','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🌟','name':'Legendäre Krönung','value':'s1_aura_legend'},
+        {'type':'title','icon':'⭐','name':'Unsterblicher Aufstieg','value':'Unsterblicher Aufstieg'},
+        {'type':'coins','icon':'🪙','name':'400 Münzen','value':'400'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'item', 'icon':'✨','name':'Absolutes Bewusstsein','value':'s1_aura_absolute'},
+        {'type':'coins','icon':'🪙','name':'500 Münzen','value':'500'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×3','value':'streak_shield'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'coins','icon':'🪙','name':'750 Münzen','value':'750'},
+        {'type':'item', 'icon':'🌟','name':'Göttliche Aufstiegs-Form','value':'s1_body_divine'},
+    ]
+
+    S2 = [
+        {'type':'title','icon':'🌑','name':'Schattenläufer','value':'Schattenläufer'},
+        {'type':'coins','icon':'🪙','name':'30 Münzen','value':'30'},
+        {'type':'item', 'icon':'🕳️','name':'Leeren-Aura','value':'s2_aura_void'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost','value':'xp_boost_24h'},
+        {'type':'title','icon':'🌙','name':'Dunkler Pfadfinder','value':'Dunkler Pfadfinder'},
+        {'type':'coins','icon':'🪙','name':'50 Münzen','value':'50'},
+        {'type':'item', 'icon':'🌙','name':'Nachtschwärmer-Aura','value':'s2_aura_night'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild','value':'streak_shield'},
+        {'type':'coins','icon':'🪙','name':'70 Münzen','value':'70'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler','value':'streak_healer'},
+        {'type':'title','icon':'🌑','name':'Herr der Stille','value':'Herr der Stille'},
+        {'type':'coins','icon':'🪙','name':'90 Münzen','value':'90'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'👻','name':'Geisterform','value':'s2_body_ghost'},
+        {'type':'title','icon':'🕶️','name':'Schatten-Jäger','value':'Schatten-Jäger'},
+        {'type':'coins','icon':'🪙','name':'110 Münzen','value':'110'},
+        {'type':'item', 'icon':'🌑','name':'Schattenriss-Aura','value':'s2_aura_shadow'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×2','value':'streak_shield'},
+        {'type':'title','icon':'🌑','name':'Geist der Dunkelheit','value':'Geist der Dunkelheit'},
+        {'type':'coins','icon':'🪙','name':'160 Münzen','value':'160'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'title','icon':'👁️','name':'Der Namenlose','value':'Der Namenlose'},
+        {'type':'coins','icon':'🪙','name':'220 Münzen','value':'220'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×3','value':'streak_shield'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'item', 'icon':'🌑','name':'Schatten-Inkarnation','value':'s2_body_shade'},
+        {'type':'title','icon':'👑','name':'Meister des Schattens','value':'Meister des Schattens'},
+        {'type':'coins','icon':'🪙','name':'280 Münzen','value':'280'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'title','icon':'🌑','name':'Fürst des Nichts','value':'Fürst des Nichts'},
+        {'type':'coins','icon':'🪙','name':'350 Münzen','value':'350'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×3','value':'streak_shield'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×4','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×4','value':'xp_boost_24h'},
+        {'type':'title','icon':'☠️','name':'Der Ewige Schatten','value':'Der Ewige Schatten'},
+        {'type':'coins','icon':'🪙','name':'450 Münzen','value':'450'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×4','value':'streak_healer'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×4','value':'streak_shield'},
+        {'type':'coins','icon':'🪙','name':'600 Münzen','value':'600'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×5','value':'streak_healer'},
+        {'type':'coins','icon':'🪙','name':'800 Münzen','value':'800'},
+        {'type':'item', 'icon':'🌑','name':'Göttlicher Schatten','value':'s2_body_shade'},
+    ]
+
+    S3 = [
+        {'type':'title','icon':'🔥','name':'Feuerwacht','value':'Feuerwacht'},
+        {'type':'coins','icon':'🪙','name':'30 Münzen','value':'30'},
+        {'type':'item', 'icon':'🔥','name':'Glutkern-Aura','value':'s3_aura_ember'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost','value':'xp_boost_24h'},
+        {'type':'title','icon':'🌋','name':'Flammengeboren','value':'Flammengeboren'},
+        {'type':'coins','icon':'🪙','name':'50 Münzen','value':'50'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild','value':'streak_shield'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler','value':'streak_healer'},
+        {'type':'coins','icon':'🪙','name':'70 Münzen','value':'70'},
+        {'type':'item', 'icon':'🔥','name':'Flammenreiter-Form','value':'s3_body_fire'},
+        {'type':'title','icon':'🔥','name':'Hüter des Feuers','value':'Hüter des Feuers'},
+        {'type':'coins','icon':'🪙','name':'90 Münzen','value':'90'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'title','icon':'🌋','name':'Aschereiter','value':'Aschereiter'},
+        {'type':'coins','icon':'🪙','name':'120 Münzen','value':'120'},
+        {'type':'item', 'icon':'🌋','name':'Höllenfeuer-Aura','value':'s3_aura_hellfire'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×2','value':'streak_shield'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×2','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×2','value':'streak_healer'},
+        {'type':'title','icon':'😈','name':'Dämonenfürst','value':'Dämonenfürst'},
+        {'type':'coins','icon':'🪙','name':'180 Münzen','value':'180'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×2','value':'streak_shield'},
+        {'type':'title','icon':'🔥','name':'Flammen-Gott','value':'Flammen-Gott'},
+        {'type':'coins','icon':'🪙','name':'250 Münzen','value':'250'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×3','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×3','value':'streak_shield'},
+        {'type':'item', 'icon':'😈','name':'Dämonische Inkarnation','value':'s3_body_demon'},
+        {'type':'title','icon':'🌋','name':'Herr des Infernos','value':'Herr des Infernos'},
+        {'type':'coins','icon':'🪙','name':'320 Münzen','value':'320'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×4','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×3','value':'streak_healer'},
+        {'type':'title','icon':'😈','name':'Verkörperung des Chaos','value':'Verkörperung des Chaos'},
+        {'type':'coins','icon':'🪙','name':'400 Münzen','value':'400'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×4','value':'streak_shield'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×4','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×4','value':'streak_healer'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'title','icon':'☄️','name':'Der Unvergängliche','value':'Der Unvergängliche'},
+        {'type':'coins','icon':'🪙','name':'500 Münzen','value':'500'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×5','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×5','value':'streak_healer'},
+        {'type':'item', 'icon':'🛡️','name':'Streak-Schild ×5','value':'streak_shield'},
+        {'type':'coins','icon':'🪙','name':'700 Münzen','value':'700'},
+        {'type':'item', 'icon':'⚡','name':'XP-Boost ×6','value':'xp_boost_24h'},
+        {'type':'item', 'icon':'💚','name':'Streak-Heiler ×5','value':'streak_healer'},
+        {'type':'coins','icon':'🪙','name':'1000 Münzen','value':'1000'},
+        {'type':'item', 'icon':'😈','name':'Göttliche Dämonischen Form','value':'s3_body_demon'},
+    ]
+
+    return [
+        {'id':1,'name':'Der Aufstieg',   'icon':'⬆️','color':'#00d4ff','tiers':_tiers(S1)},
+        {'id':2,'name':'Die Dunkelheit', 'icon':'🌑','color':'#9b59b6','tiers':_tiers(S2)},
+        {'id':3,'name':'Das Inferno',    'icon':'🔥','color':'#e74c3c','tiers':_tiers(S3)},
+    ]
+
+SEASON_PASS_DATA = _build_season_pass_data()
+
+SHOP_SEED = [
+    # (item_key, name, description, category, icon, cost, rarity, effect_type, effect_value, unlock_level, stackable)
+    ('blue_aura',      'Blaue Aura',         'Ruhige Energie um deinen Charakter',       'cosmetic_aura',  '🔵',  20,   'common',    'aura','blue',     1,  0),
+    ('green_aura',     'Grüne Aura',          'Frische Lebensenergie',                    'cosmetic_aura',  '🟢',  35,   'common',    'aura','green',    3,  0),
+    ('title_diligent', 'Der Fleißige',        'Dein erster Titel',                        'title',          '📜',  15,   'common',    'title','Der Fleißige', 1, 0),
+    ('gold_crown',     'Goldene Krone',       'Ein Zeichen der Stärke',                   'cosmetic_body',  '👑',  60,   'rare',      'body','crown',    5,  0),
+    ('purple_aura',    'Purpur-Aura',         'Mystische violette Macht',                 'cosmetic_aura',  '🟣',  80,   'rare',      'aura','purple',   8,  0),
+    ('title_quester',  'Quest-Meister',       'Du meisterst Quest nach Quest',            'title',          '⚔️',  80,   'rare',      'title','Quest-Meister', 15, 0),
+    ('xp_boost_24h',   'XP-Boost 24h',       '+50% XP für 24 Stunden',                  'consumable',     '⚡',  55,   'rare',      'xp_boost','1.5',  1,  1),
+    ('streak_shield',  'Streak-Schild',       'Schützt deinen Habit-Streak einmal',      'consumable',     '🛡️',  80,   'rare',      'streak_shield','1', 5, 1),
+    ('xp_master_1',    'XP-Meister I',       '+10% XP permanent',                        'upgrade',        '🔮',  350,  'rare',      'xp_perm','0.10', 15,  0),
+    ('streak_healer',  'Streak-Heiler',       'Repariert einen verlorenen Streak-Tag',    'consumable',     '💚',  160,  'epic',      'streak_heal','1', 10, 1),
+    ('dragon_aura',    'Drachen-Aura',        'Die Kraft des Drachen fließt um dich',    'cosmetic_aura',  '🐉',  320,  'epic',      'aura','dragon',   25,  0),
+    ('title_focus',    'Fokus-Gott',          'Maximale Konzentration, max. Leistung',    'title',          '🎯',  220,  'epic',      'title','Fokus-Gott', 30, 0),
+    ('double_coins',   'Doppelte Münzen 24h', 'Level-ups geben 2× Münzen',               'consumable',     '🪙',  110,  'epic',      'coin_boost_temp','2.0', 10, 1),
+    ('xp_master_2',    'XP-Meister II',      '+25% XP permanent (req. XP-Meister I)',    'upgrade',        '💎',  1100, 'epic',      'xp_perm','0.25', 40,  0),
+    ('coin_magnet',    'Münzmagnet',          '+30% Münzen bei Level-ups permanent',      'upgrade',        '🧲',  450,  'rare',      'coin_perm','0.30', 25, 0),
+    ('rainbow_aura',   'Regenbogen-Aura',     'Das volle Spektrum der Produktivität',     'cosmetic_aura',  '🌈',  550,  'epic',      'aura','rainbow',  50,  0),
+    ('title_unstop',   'Der Unaufhaltsame',   'Nichts kann dich stoppen',                 'title',          '👹',  550,  'legendary', 'title','Der Unaufhaltsame', 60, 0),
+    ('shadow_cloak',   'Schatten-Mantel',     'Dunkle Macht des Schattens',               'cosmetic_body',  '🕶️',  800,  'legendary', 'body','shadow',   75,  0),
+    ('divine_halo',    'Göttliche Aureole',   'Für Produktivitäts-Götter',                'cosmetic_aura',  '✨',  2200, 'legendary', 'aura','divine',  100,  0),
+    ('title_legend',   'Legende',             'Du bist eine Produktivitäts-Legende',      'title',          '🏆',  1100, 'legendary', 'title','Legende', 100, 0),
+    ('xp_master_3',    'XP-Meister III',     '+50% XP permanent (req. II)',               'upgrade',        '🌟',  3000, 'legendary', 'xp_perm','0.50', 75,  0),
+    ('godly_body',     'Göttlicher Körper',   'Die ultimative Form',                       'cosmetic_body',  '🌟',  5000, 'legendary', 'body','godly',   200,  0),
+]
 MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni",
           "Juli", "August", "September", "Oktober", "November", "Dezember"]
 
@@ -46,12 +310,35 @@ def init_db():
     ''')
     c.execute("PRAGMA table_info(entries)")
     cols = [r[1] for r in c.fetchall()]
-    for col, typedef in [('started_at', 'TEXT'), ('deadline', 'TEXT')]:
+    for col, typedef in [('started_at','TEXT'),('deadline','TEXT'),('micro_action','TEXT'),('category_id','INTEGER')]:
         if col not in cols:
             try:
                 c.execute(f'ALTER TABLE entries ADD COLUMN {col} {typedef}')
             except Exception:
                 pass
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS task_categories (
+        id   INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        icon TEXT DEFAULT '📌',
+        color TEXT DEFAULT '#636e72',
+        base_xp INTEGER DEFAULT 100,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    # Seed default categories if table is empty
+    if not c.execute("SELECT COUNT(*) FROM task_categories").fetchone()[0]:
+        defaults = [
+            ('🧠 Brain Work',    '🧠','#9b59b6',120,0),
+            ('⚡ Quick Win',     '⚡','#27ae60', 50,1),
+            ('💪 Deep Focus',    '💪','#e74c3c',200,2),
+            ('🎯 Strategisch',   '🎯','#ffd700',150,3),
+            ('📞 Kommunikation', '📞','#3498db', 80,4),
+        ]
+        for (nm,ic,cl,xp,so) in defaults:
+            c.execute("INSERT INTO task_categories (name,icon,color,base_xp,sort_order) VALUES (?,?,?,?,?)",
+                      (nm,ic,cl,xp,so))
     c.execute('''
     CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -98,6 +385,125 @@ def init_db():
         last_generated TEXT
     )
     ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS reviews (
+        id INTEGER PRIMARY KEY,
+        review_type TEXT,
+        content TEXT,
+        review_date TEXT,
+        created_at TEXT
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS ki_insights (
+        id INTEGER PRIMARY KEY,
+        category TEXT,
+        insight TEXT,
+        created_at TEXT
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS habits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        category TEXT DEFAULT 'general',
+        icon TEXT DEFAULT '⭐',
+        color TEXT DEFAULT '#00d4ff',
+        sort_order INTEGER DEFAULT 0,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS habit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        habit_id INTEGER REFERENCES habits(id) ON DELETE CASCADE,
+        log_date TEXT NOT NULL,
+        energy_level INTEGER NOT NULL DEFAULT 100,
+        completion_pct INTEGER NOT NULL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(habit_id, log_date)
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS character_data (
+        id INTEGER PRIMARY KEY,
+        name TEXT DEFAULT 'Hero',
+        class_id TEXT DEFAULT '',
+        total_xp INTEGER DEFAULT 0,
+        coins INTEGER DEFAULT 0,
+        equipped_title TEXT DEFAULT '',
+        equipped_aura TEXT DEFAULT '',
+        equipped_body TEXT DEFAULT '',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS shop_items (
+        id INTEGER PRIMARY KEY,
+        item_key TEXT UNIQUE,
+        name TEXT,
+        description TEXT,
+        category TEXT,
+        icon TEXT,
+        cost_coins INTEGER DEFAULT 50,
+        rarity TEXT DEFAULT 'common',
+        effect_type TEXT DEFAULT '',
+        effect_value TEXT DEFAULT '',
+        unlock_level INTEGER DEFAULT 1,
+        stackable INTEGER DEFAULT 0
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS player_inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        item_key TEXT,
+        purchased_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        equipped INTEGER DEFAULT 0,
+        uses_remaining INTEGER DEFAULT -1
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS level_ups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        level_reached INTEGER,
+        coins_earned INTEGER,
+        achieved_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS player_season (
+        id INTEGER PRIMARY KEY,
+        season_id INTEGER DEFAULT 1,
+        season_xp INTEGER DEFAULT 0
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS season_claimed (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        season_id INTEGER,
+        tier_number INTEGER,
+        claimed_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(season_id, tier_number)
+    )
+    ''')
+    # Seed shop items
+    for (ik,nm,desc,cat,icon,cost,rar,eft,efv,unlvl,stack) in SHOP_SEED:
+        c.execute("""
+            INSERT OR IGNORE INTO shop_items
+            (item_key,name,description,category,icon,cost_coins,rarity,effect_type,effect_value,unlock_level,stackable)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (ik,nm,desc,cat,icon,cost,rar,eft,efv,unlvl,stack))
+    # Seed season exclusive items
+    for (ik,nm,desc,cat,icon,cost,rar,eft,efv,unlvl,stack) in SEASON_EXCLUSIVE_ITEMS:
+        c.execute("""
+            INSERT OR IGNORE INTO shop_items
+            (item_key,name,description,category,icon,cost_coins,rarity,effect_type,effect_value,unlock_level,stackable)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        """, (ik,nm,desc,cat,icon,cost,rar,eft,efv,unlvl,stack))
+    # Ensure player_season row exists
+    c.execute("INSERT OR IGNORE INTO player_season (id,season_id,season_xp) VALUES (1,1,0)")
     conn.commit()
     conn.close()
 
@@ -131,6 +537,38 @@ def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0,
                  VALUES (?,?,?,?,?,?,?,?,?,?)''',
               (entry_type, content, tags or "", priority, estimate, points,
                now, entry_date, now, deadline or ""))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return new_id
+
+
+def get_categories():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id,name,icon,color,base_xp,sort_order FROM task_categories ORDER BY sort_order,id"
+    ).fetchall()
+    conn.close()
+    keys = ['id','name','icon','color','base_xp','sort_order']
+    return [dict(zip(keys,r)) for r in rows]
+
+
+def get_category(cat_id):
+    if not cat_id:
+        return None
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id,name,icon,color,base_xp,sort_order FROM task_categories WHERE id=?", (cat_id,)
+    ).fetchone()
+    conn.close()
+    if row:
+        return dict(zip(['id','name','icon','color','base_xp','sort_order'], row))
+    return None
+
+
+def set_entry_category(entry_id, category_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE entries SET category_id=? WHERE id=?", (category_id, entry_id))
     conn.commit()
     conn.close()
 
@@ -139,7 +577,8 @@ def get_today_entries():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points,
-                        created_at, entry_date, done, completed_at, elapsed_seconds, started_at, deadline
+                        created_at, entry_date, done, completed_at, elapsed_seconds, started_at,
+                        deadline, micro_action, category_id
                  FROM entries WHERE entry_date=? ORDER BY id DESC''', (date.today().isoformat(),))
     rows = c.fetchall()
     conn.close()
@@ -150,7 +589,8 @@ def get_all_entries():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT id, entry_type, content, tags, priority, estimate_minutes, points,
-                        created_at, entry_date, done, completed_at, elapsed_seconds, started_at, deadline
+                        created_at, entry_date, done, completed_at, elapsed_seconds, started_at,
+                        deadline, micro_action, category_id
                  FROM entries ORDER BY entry_date DESC, id DESC''')
     rows = c.fetchall()
     conn.close()
@@ -166,11 +606,26 @@ def toggle_done(entry_id, new, elapsed_seconds=0, points=None):
             points = POINTS_PER_TASK
         c.execute('UPDATE entries SET done=1, completed_at=?, elapsed_seconds=?, points=?, last_modified=?, started_at=NULL WHERE id=?',
                   (now, elapsed_seconds, points, now, entry_id))
+        conn.commit()
+        conn.close()
+        # Award XP based on task type
+        row_e = sqlite3.connect(DB_PATH).execute(
+            "SELECT entry_type, estimate_minutes, category_id FROM entries WHERE id=?", (entry_id,)
+        ).fetchone()
+        if row_e:
+            etype, est_min, cat_id = row_e
+            cat = get_category(cat_id) if cat_id else None
+            xp_base = cat['base_xp'] if cat else {'highlight': 200, 'brain': 100, 'micro': 50}.get(etype, 100)
+            est_secs = (est_min or 0) * 60
+            is_fast = est_secs > 0 and 0 < elapsed_seconds < est_secs
+            if is_fast:
+                xp_base += 30
+            award_xp(xp_base, entry_type=etype, speed_bonus=is_fast)
     else:
         c.execute('UPDATE entries SET done=0, completed_at=NULL, elapsed_seconds=0, points=0, last_modified=?, started_at=NULL WHERE id=?',
                   (now, entry_id))
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
 
 
 def total_points():
@@ -301,6 +756,485 @@ def get_analytics_stats():
         "completed": completed_tasks, "total": total_tasks,
         "total_minutes": int(total_time / 60),
         "type_stats": type_stats, "tag_stats": tag_stats, "daily_trend": daily_trend
+    }
+
+
+# ─── RPG / XP System ────────────────────────────────────────────
+
+def xp_for_next_level(level):
+    return 150 + (level - 1) * 50
+
+
+def compute_level(total_xp):
+    """Returns (level, xp_in_current_level, xp_needed_for_next)."""
+    level, remaining = 1, max(0, total_xp)
+    while True:
+        needed = xp_for_next_level(level)
+        if remaining >= needed:
+            remaining -= needed
+            level += 1
+        else:
+            return level, remaining, needed
+
+
+def get_character():
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id,name,class_id,total_xp,coins,equipped_title,equipped_aura,equipped_body FROM character_data LIMIT 1"
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return dict(zip(["id","name","class_id","total_xp","coins","equipped_title","equipped_aura","equipped_body"], row))
+
+
+def save_character(name, class_id):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT id FROM character_data").fetchone()
+    if row:
+        conn.execute("UPDATE character_data SET name=?,class_id=? WHERE id=1", (name, class_id))
+    else:
+        conn.execute("INSERT INTO character_data (id,name,class_id,total_xp,coins) VALUES (1,?,?,0,0)",
+                      (name, class_id))
+    conn.commit()
+    conn.close()
+
+
+def get_inv_by_effect(effect_type):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT pi.item_key, si.effect_value FROM player_inventory pi
+        JOIN shop_items si ON si.item_key=pi.item_key
+        WHERE si.effect_type=? AND (pi.equipped=1 OR si.category='upgrade')
+    """, (effect_type,)).fetchall()
+    conn.close()
+    return [{'item_key': r[0], 'effect_value': r[1]} for r in rows]
+
+
+def award_xp(base_xp, entry_type=None, speed_bonus=False):
+    """Awards XP with class bonus + boosts. Returns (new_level, leveled_up, coins_earned, final_xp)."""
+    char = get_character()
+    if not char:
+        return 1, False, 0, 0
+
+    mult = 1.0
+
+    # Class bonus
+    if char.get('class_id') and entry_type:
+        ci = CLASS_INFO.get(char['class_id'], {})
+        bt = ci.get('bonus_type', '')
+        if bt == entry_type or (bt == 'speed' and speed_bonus):
+            mult += ci.get('bonus_mult', 0)
+
+    # Permanent XP upgrades
+    for upg in get_inv_by_effect('xp_perm'):
+        try:
+            mult += float(upg['effect_value'])
+        except Exception:
+            pass
+
+    # Temporary XP boost (consumable)
+    expiry_str = get_setting('xp_boost_expiry', '')
+    if expiry_str:
+        try:
+            if datetime.fromisoformat(expiry_str) > datetime.utcnow():
+                mult *= float(get_setting('xp_boost_multiplier', '1.5'))
+        except Exception:
+            pass
+
+    final_xp = max(1, round(base_xp * mult))
+
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT total_xp, coins FROM character_data WHERE id=1").fetchone()
+    if not row:
+        conn.execute("INSERT INTO character_data (id,name,total_xp,coins) VALUES (1,'Hero',?,0)", (final_xp,))
+        conn.commit()
+        conn.close()
+        return 1, False, 0, final_xp
+
+    old_xp = row[0]
+    old_level = compute_level(old_xp)[0]
+    new_xp = old_xp + final_xp
+    new_level = compute_level(new_xp)[0]
+    leveled_up = new_level > old_level
+    coins_earned = 0
+
+    if leveled_up:
+        # Coin magnet perk
+        coin_bonus = sum(float(u['effect_value']) for u in get_inv_by_effect('coin_perm'))
+        # Temp coin boost
+        cb_expiry = get_setting('coin_boost_expiry', '')
+        cb_mult = 1.0
+        if cb_expiry:
+            try:
+                if datetime.fromisoformat(cb_expiry) > datetime.utcnow():
+                    cb_mult = float(get_setting('coin_boost_mult', '2.0'))
+            except Exception:
+                pass
+        for lv in range(old_level, new_level):
+            base_coins = 10 + lv * 5
+            coins_earned += round(base_coins * (1.0 + coin_bonus) * cb_mult)
+        conn.execute("UPDATE character_data SET total_xp=?,coins=coins+? WHERE id=1", (new_xp, coins_earned))
+        conn.execute("INSERT INTO level_ups (level_reached,coins_earned) VALUES (?,?)", (new_level, coins_earned))
+    else:
+        conn.execute("UPDATE character_data SET total_xp=? WHERE id=1", (new_xp,))
+
+    conn.commit()
+    conn.close()
+
+    if leveled_up:
+        if 'levelup_queue' not in st.session_state:
+            st.session_state.levelup_queue = []
+        st.session_state.levelup_queue.append({'level': new_level, 'coins': coins_earned, 'xp': final_xp})
+
+    # Award season XP in parallel
+    _award_season_xp(final_xp)
+
+    return new_level, leveled_up, coins_earned, final_xp
+
+
+def _award_season_xp(amount):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT OR IGNORE INTO player_season (id,season_id,season_xp) VALUES (1,1,0)")
+    conn.execute("UPDATE player_season SET season_xp=season_xp+? WHERE id=1", (amount,))
+    conn.commit()
+    conn.close()
+
+
+def get_player_season():
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT season_id,season_xp FROM player_season WHERE id=1").fetchone()
+    conn.close()
+    if row:
+        return {'season_id': row[0], 'season_xp': row[1]}
+    return {'season_id': 1, 'season_xp': 0}
+
+
+def get_season_claimed(season_id):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT tier_number FROM season_claimed WHERE season_id=?", (season_id,)).fetchall()
+    conn.close()
+    return {r[0] for r in rows}
+
+
+def claim_season_reward(season_id, tier_number):
+    season = next((s for s in SEASON_PASS_DATA if s['id'] == season_id), None)
+    if not season:
+        return False, "Season nicht gefunden"
+    tier = next((t for t in season['tiers'] if t['tier'] == tier_number), None)
+    if not tier:
+        return False, "Tier nicht gefunden"
+
+    sp = get_player_season()
+    if sp['season_xp'] < tier['xp']:
+        return False, "Noch nicht genug Season XP"
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute("INSERT INTO season_claimed (season_id,tier_number) VALUES (?,?)", (season_id, tier_number))
+    except sqlite3.IntegrityError:
+        conn.close()
+        return False, "Bereits eingelöst"
+    conn.commit()
+    conn.close()
+
+    rtype = tier['type']
+    rval = tier['value']
+
+    if rtype == 'coins':
+        amount = int(rval)
+        conn2 = sqlite3.connect(DB_PATH)
+        conn2.execute("UPDATE character_data SET coins=coins+? WHERE id=1", (amount,))
+        conn2.commit()
+        conn2.close()
+        return True, f"💰 +{amount} Münzen erhalten!"
+
+    elif rtype == 'title':
+        conn2 = sqlite3.connect(DB_PATH)
+        conn2.execute("UPDATE character_data SET equipped_title=? WHERE id=1", (rval,))
+        conn2.commit()
+        conn2.close()
+        return True, f"🏅 Titel '{rval}' freigeschaltet und ausgerüstet!"
+
+    elif rtype == 'item':
+        conn2 = sqlite3.connect(DB_PATH)
+        # Handle stackable consumables (add multiple uses)
+        item_row = conn2.execute("SELECT stackable,effect_type FROM shop_items WHERE item_key=?", (rval,)).fetchone()
+        if item_row:
+            existing = conn2.execute(
+                "SELECT id,uses_remaining FROM player_inventory WHERE item_key=? AND uses_remaining IS NOT NULL AND uses_remaining > 0",
+                (rval,)
+            ).fetchone()
+            if existing:
+                conn2.execute("UPDATE player_inventory SET uses_remaining=uses_remaining+1 WHERE id=?", (existing[0],))
+            else:
+                conn2.execute(
+                    "INSERT INTO player_inventory (item_key,purchased_at,equipped,uses_remaining) VALUES (?,?,0,1)",
+                    (rval, datetime.utcnow().isoformat())
+                )
+        conn2.commit()
+        conn2.close()
+        return True, f"🎁 '{tier['name']}' erhalten!"
+
+    return True, "Belohnung eingelöst!"
+
+
+def advance_season_if_complete():
+    sp = get_player_season()
+    season = next((s for s in SEASON_PASS_DATA if s['id'] == sp['season_id']), None)
+    if not season:
+        return
+    claimed = get_season_claimed(sp['season_id'])
+    if len(claimed) >= len(season['tiers']):
+        next_sid = sp['season_id'] + 1
+        if any(s['id'] == next_sid for s in SEASON_PASS_DATA):
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("UPDATE player_season SET season_id=?,season_xp=0 WHERE id=1", (next_sid,))
+            conn.commit()
+            conn.close()
+            return next_sid
+    return None
+
+
+def get_all_shop_items():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT item_key,name,description,category,icon,cost_coins,rarity,effect_type,effect_value,unlock_level,stackable FROM shop_items ORDER BY cost_coins"
+    ).fetchall()
+    conn.close()
+    keys = ["item_key","name","description","category","icon","cost_coins","rarity","effect_type","effect_value","unlock_level","stackable"]
+    # Filter out season-exclusive items from the regular shop
+    return [dict(zip(keys, r)) for r in rows if r[0] not in SEASON_EXCLUSIVE_KEYS]
+
+
+def get_inventory():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT pi.id, pi.item_key, pi.equipped, pi.uses_remaining, pi.purchased_at,
+               si.name, si.icon, si.rarity, si.effect_type, si.effect_value, si.category, si.description
+        FROM player_inventory pi JOIN shop_items si ON si.item_key=pi.item_key
+        ORDER BY pi.purchased_at DESC
+    """).fetchall()
+    conn.close()
+    keys = ["id","item_key","equipped","uses_remaining","purchased_at","name","icon","rarity","effect_type","effect_value","category","description"]
+    return [dict(zip(keys, r)) for r in rows]
+
+
+def buy_item(item_key):
+    conn = sqlite3.connect(DB_PATH)
+    item = conn.execute(
+        "SELECT cost_coins,stackable,name,category,effect_type FROM shop_items WHERE item_key=?", (item_key,)
+    ).fetchone()
+    if not item:
+        conn.close()
+        return False, "Item nicht gefunden"
+    cost, stackable, iname, cat, eff_type = item
+    char = conn.execute("SELECT coins FROM character_data WHERE id=1").fetchone()
+    if not char:
+        conn.close()
+        return False, "Erstelle zuerst deinen Charakter!"
+    if char[0] < cost:
+        conn.close()
+        return False, f"Zu wenig Münzen! (hast: {char[0]} · braucht: {cost})"
+    if not stackable:
+        owned = conn.execute("SELECT id FROM player_inventory WHERE item_key=?", (item_key,)).fetchone()
+        if owned:
+            conn.close()
+            return False, f"Du besitzt '{iname}' bereits"
+
+    conn.execute("UPDATE character_data SET coins=coins-? WHERE id=1", (cost,))
+    # consumables get limited uses, upgrades auto-equip
+    uses = 3 if cat == 'consumable' else -1
+    equipped_val = 1 if cat == 'upgrade' else 0
+    conn.execute("INSERT INTO player_inventory (item_key,equipped,uses_remaining) VALUES (?,?,?)",
+                  (item_key, equipped_val, uses))
+    conn.commit()
+    conn.close()
+    return True, f"✅ '{iname}' gekauft!"
+
+
+def equip_item(inv_id, item_key, category):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT equipped FROM player_inventory WHERE id=?", (inv_id,)).fetchone()
+    if not row:
+        conn.close()
+        return
+    new_state = 0 if row[0] else 1
+    slot_col = {'cosmetic_aura': 'equipped_aura', 'cosmetic_body': 'equipped_body', 'title': 'equipped_title'}.get(category)
+    if new_state == 1 and slot_col:
+        conn.execute("UPDATE player_inventory SET equipped=0 WHERE item_key IN (SELECT item_key FROM shop_items WHERE category=?) AND id!=?", (category, inv_id))
+        item_row = conn.execute("SELECT effect_value FROM shop_items WHERE item_key=?", (item_key,)).fetchone()
+        conn.execute(f"UPDATE character_data SET {slot_col}=? WHERE id=1", (item_row[0] if item_row else '',))
+    elif slot_col:
+        conn.execute(f"UPDATE character_data SET {slot_col}='' WHERE id=1")
+    conn.execute("UPDATE player_inventory SET equipped=? WHERE id=?", (new_state, inv_id))
+    conn.commit()
+    conn.close()
+
+
+def use_item(inv_id):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("""
+        SELECT pi.uses_remaining, si.effect_type, si.effect_value, si.name
+        FROM player_inventory pi JOIN shop_items si ON si.item_key=pi.item_key WHERE pi.id=?
+    """, (inv_id,)).fetchone()
+    if not row:
+        conn.close()
+        return False, "Item nicht gefunden"
+    uses, eff_type, eff_val, iname = row
+    if uses == 0:
+        conn.close()
+        return False, "Keine Verwendungen mehr übrig"
+    msg = ""
+    if eff_type == 'xp_boost':
+        expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+        conn.execute("UPDATE settings SET value=? WHERE key='xp_boost_expiry'", (expiry,))
+        if not conn.execute("SELECT 1 FROM settings WHERE key='xp_boost_expiry'").fetchone():
+            conn.execute("INSERT INTO settings VALUES ('xp_boost_expiry',?)", (expiry,))
+        mult_key, mult_val = 'xp_boost_multiplier', eff_val
+        conn.execute("INSERT OR REPLACE INTO settings VALUES (?,?)", (mult_key, mult_val))
+        msg = f"⚡ XP-Boost aktiv! +{int((float(eff_val)-1)*100)}% XP für 24h"
+    elif eff_type == 'streak_shield':
+        conn.execute("INSERT OR REPLACE INTO settings VALUES ('streak_shield_active','1')")
+        msg = "🛡️ Streak-Schild aktiv! Nächster verpasster Tag wird vergeben."
+    elif eff_type == 'streak_heal':
+        msg = "💚 Streak-Heiler verwendet. Dein Streak wurde um 1 Tag verlängert."
+    elif eff_type == 'coin_boost_temp':
+        expiry = (datetime.utcnow() + timedelta(hours=24)).isoformat()
+        conn.execute("INSERT OR REPLACE INTO settings VALUES ('coin_boost_expiry',?)", (expiry,))
+        conn.execute("INSERT OR REPLACE INTO settings VALUES ('coin_boost_mult',?)", (eff_val,))
+        msg = f"🪙 Doppelte Münzen aktiv für 24h!"
+    else:
+        msg = f"'{iname}' wurde verwendet."
+    if uses > 0:
+        conn.execute("UPDATE player_inventory SET uses_remaining=uses_remaining-1 WHERE id=?", (inv_id,))
+        conn.execute("DELETE FROM player_inventory WHERE id=? AND uses_remaining<=0", (inv_id,))
+    conn.commit()
+    conn.close()
+    return True, msg
+
+
+def get_level_history():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT level_reached, coins_earned, achieved_at FROM level_ups ORDER BY level_reached DESC LIMIT 50").fetchall()
+    conn.close()
+    return rows
+
+
+# ─── Habit Tracker DB ───────────────────────────────────────────
+
+def get_habits(active_only=True):
+    conn = sqlite3.connect(DB_PATH)
+    q = "SELECT id, name, category, icon, color, sort_order, active FROM habits"
+    if active_only:
+        q += " WHERE active=1"
+    rows = conn.execute(q + " ORDER BY sort_order, id").fetchall()
+    conn.close()
+    return [dict(zip(["id","name","category","icon","color","sort_order","active"], r)) for r in rows]
+
+
+def add_habit(name, category="general", icon="⭐", color="#00d4ff"):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("INSERT INTO habits (name,category,icon,color) VALUES (?,?,?,?)",
+                  (name, category, icon, color))
+    conn.commit()
+    conn.close()
+
+
+def delete_habit(habit_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM habits WHERE id=?", (habit_id,))
+    conn.commit()
+    conn.close()
+
+
+def log_habit(habit_id, log_date, energy_level, completion_pct, notes=""):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        INSERT INTO habit_logs (habit_id, log_date, energy_level, completion_pct, notes)
+        VALUES (?,?,?,?,?)
+        ON CONFLICT(habit_id, log_date) DO UPDATE SET
+            energy_level=excluded.energy_level,
+            completion_pct=excluded.completion_pct,
+            notes=excluded.notes
+    """, (habit_id, log_date, energy_level, completion_pct, notes))
+    conn.commit()
+    conn.close()
+
+
+def get_habit_log(habit_id, log_date):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT id,habit_id,log_date,energy_level,completion_pct,notes FROM habit_logs WHERE habit_id=? AND log_date=?",
+        (habit_id, log_date)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return dict(zip(["id","habit_id","log_date","energy_level","completion_pct","notes"], row))
+
+
+def get_habit_logs_range(habit_id, days=84):
+    conn = sqlite3.connect(DB_PATH)
+    from_date = (date.today() - timedelta(days=days - 1)).isoformat()
+    rows = conn.execute("""
+        SELECT log_date, energy_level, completion_pct, notes FROM habit_logs
+        WHERE habit_id=? AND log_date>=? ORDER BY log_date
+    """, (habit_id, from_date)).fetchall()
+    conn.close()
+    return [dict(zip(["log_date","energy_level","completion_pct","notes"], r)) for r in rows]
+
+
+def get_today_energy():
+    val = get_setting(f"energy_{date.today().isoformat()}")
+    return int(val) if val else 80
+
+
+def set_today_energy(pct):
+    set_setting(f"energy_{date.today().isoformat()}", str(int(pct)))
+
+
+def get_weekday_stats():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT CAST(strftime('%w', completed_at) AS INTEGER) as wd,
+               COUNT(*) as tasks, SUM(elapsed_seconds) as secs
+        FROM entries WHERE done=1 AND completed_at IS NOT NULL
+        GROUP BY wd ORDER BY wd
+    """).fetchall()
+    conn.close()
+    return rows
+
+
+def get_personal_records():
+    conn = sqlite3.connect(DB_PATH)
+    best_day = conn.execute("""
+        SELECT DATE(completed_at) as d, COUNT(*) as n FROM entries
+        WHERE done=1 AND completed_at IS NOT NULL
+        GROUP BY d ORDER BY n DESC LIMIT 1
+    """).fetchone()
+    best_time_day = conn.execute("""
+        SELECT DATE(completed_at) as d, SUM(elapsed_seconds) as s FROM entries
+        WHERE done=1 AND completed_at IS NOT NULL
+        GROUP BY d ORDER BY s DESC LIMIT 1
+    """).fetchone()
+    total_secs = conn.execute(
+        "SELECT SUM(elapsed_seconds) FROM entries WHERE done=1"
+    ).fetchone()[0] or 0
+    longest = conn.execute("""
+        SELECT content, elapsed_seconds FROM entries WHERE done=1 AND elapsed_seconds>0
+        ORDER BY elapsed_seconds DESC LIMIT 1
+    """).fetchone()
+    active_days = conn.execute("""
+        SELECT COUNT(DISTINCT DATE(completed_at)) FROM entries
+        WHERE done=1 AND completed_at IS NOT NULL
+        AND completed_at > datetime('now', '-30 days')
+    """).fetchone()[0] or 0
+    conn.close()
+    return {
+        'best_day': best_day, 'best_time_day': best_time_day,
+        'total_hours': round(total_secs / 3600, 1),
+        'longest': longest, 'active_days_30': active_days
     }
 
 
@@ -598,6 +1532,602 @@ def gist_create(token, data_dict, description="Kaizen export"):
     return r.status_code, r.json()
 
 
+# ========== KI COACH ==========
+
+def build_ai_context(days_back=0):
+    today_str = date.today().isoformat()
+    today_name = WOCHENTAGE[date.today().weekday()]
+    period_start = (date.today() - timedelta(days=days_back)).isoformat() if days_back > 0 else today_str
+    tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+    next_week_str = (date.today() + timedelta(days=7)).isoformat()
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+
+    c.execute('''SELECT entry_date, entry_type, content, done, elapsed_seconds, tags, deadline, points
+                 FROM entries WHERE entry_date >= ? AND entry_date <= ? ORDER BY entry_date, id''',
+              (period_start, today_str))
+    period_entries = c.fetchall()
+
+    c.execute('''SELECT entry_date, COUNT(*) as total, SUM(done) as done_count, SUM(elapsed_seconds) as total_sec
+                 FROM entries WHERE entry_date >= ? AND entry_date <= ?
+                 GROUP BY entry_date ORDER BY entry_date''', (period_start, today_str))
+    daily_stats = c.fetchall()
+
+    c.execute('''SELECT entry_type, COUNT(*), SUM(done), AVG(elapsed_seconds)
+                 FROM entries WHERE entry_date >= ? AND entry_date <= ?
+                 GROUP BY entry_type''', (period_start, today_str))
+    type_stats = c.fetchall()
+
+    c.execute('''SELECT tags, COUNT(*) as cnt, SUM(done) as done_cnt
+                 FROM entries WHERE entry_date >= ? AND entry_date <= ?
+                 AND done=1 AND tags!='' AND tags IS NOT NULL
+                 GROUP BY tags ORDER BY cnt DESC LIMIT 8''', (period_start, today_str))
+    tag_stats = c.fetchall()
+
+    c.execute('''SELECT content, deadline FROM entries
+                 WHERE done=0 AND deadline!='' AND deadline IS NOT NULL AND deadline < ?
+                 ORDER BY deadline''', (today_str,))
+    overdue = c.fetchall()
+
+    c.execute('''SELECT content, deadline FROM entries
+                 WHERE done=0 AND deadline!='' AND deadline IS NOT NULL
+                 AND deadline >= ? AND deadline <= ? ORDER BY deadline''', (tomorrow_str, next_week_str))
+    upcoming = c.fetchall()
+
+    c.execute('SELECT id, name, deadline, daily_minutes FROM projects WHERE active=1 ORDER BY deadline')
+    projects = c.fetchall()
+    project_infos = []
+    for pid, pname, pdeadline, daily_mins in projects:
+        c.execute('SELECT COUNT(*), SUM(done) FROM project_tasks WHERE project_id=?', (pid,))
+        row = c.fetchone()
+        total = row[0] or 0
+        done_cnt = int(row[1] or 0)
+        pct = int(done_cnt / total * 100) if total else 0
+        c.execute('SELECT content FROM project_tasks WHERE project_id=? AND done=0 ORDER BY priority DESC, order_index LIMIT 1', (pid,))
+        next_row = c.fetchone()
+        project_infos.append((pname, pdeadline, total, done_cnt, pct, next_row[0] if next_row else None))
+
+    c.execute('SELECT COUNT(*), SUM(done), SUM(elapsed_seconds), SUM(points) FROM entries')
+    at = c.fetchone()
+    at_total, at_done, at_sec, at_pts = at[0] or 0, at[1] or 0, at[2] or 0, at[3] or 0
+
+    c.execute('SELECT COUNT(*) FROM recurring_tasks WHERE active=1')
+    active_routines = c.fetchone()[0]
+
+    conn.close()
+
+    level, progress, level_step = get_level_and_progress()
+    insights = get_ki_insights(limit=15)
+
+    total_period = sum(r[1] for r in daily_stats)
+    done_period = sum(int(r[2] or 0) for r in daily_stats)
+    time_period_min = int(sum(int(r[3] or 0) for r in daily_stats) / 60)
+
+    lines = []
+    if days_back == 0:
+        lines.append(f"## Heute — {today_name}, {today_str}\n")
+    else:
+        lines.append(f"## Zeitraum: {period_start} bis {today_str} ({days_back + 1} Tage)\n")
+
+    lines.append(f"**Zeitraum:** {done_period}/{total_period} Aufgaben erledigt | {time_period_min} Min investiert")
+    lines.append(f"**All-Time:** {at_done}/{at_total} Aufgaben | {int(at_sec/60)} Min | {at_pts} Punkte gesamt")
+    lines.append(f"**Level {level}** ({progress}/{level_step} bis nächstes) | {active_routines} aktive Routinen\n")
+
+    if days_back == 0:
+        today_entries_flat = [(e[1], e[2], e[3], e[6]) for e in period_entries]
+        today_open = [(e[0], e[1], e[3]) for e in today_entries_flat if not e[2]]
+        today_done_list = [(e[0], e[1]) for e in today_entries_flat if e[2]]
+        if today_open:
+            lines.append("**Offen heute:**")
+            for etype, content, dl in today_open:
+                dl_info = f" ⏰ {dl}" if dl else ""
+                lines.append(f"- [{TYPE_LABELS.get(etype, etype).split()[-1]}] {content}{dl_info}")
+        if today_done_list:
+            lines.append("**Heute erledigt:**")
+            for etype, content in today_done_list:
+                lines.append(f"- ✅ {content}")
+        lines.append("")
+
+    if days_back > 0 and len(daily_stats) > 1:
+        lines.append("**Tagesweise:**")
+        for day, total, done_c, elapsed_sec in daily_stats:
+            done_c = done_c or 0
+            rate = int(done_c / total * 100) if total else 0
+            lines.append(f"- {day}: {done_c}/{total} ({rate}%), {int((elapsed_sec or 0)/60)} min")
+        lines.append("")
+
+    if type_stats:
+        lines.append("**Aufgabentypen:**")
+        for etype, cnt, done_c, avg_sec in type_stats:
+            done_c = done_c or 0
+            rate = int(done_c / cnt * 100) if cnt else 0
+            lines.append(f"- {TYPE_LABELS.get(etype, etype)}: {done_c}/{cnt} ({rate}%), Ø {int((avg_sec or 0)/60)} min")
+        lines.append("")
+
+    if tag_stats:
+        lines.append("**Top Tags:**")
+        for tags, cnt, done_c in tag_stats[:5]:
+            lines.append(f"- {tags}: {done_c or 0}/{cnt} erledigt")
+        lines.append("")
+
+    if overdue:
+        lines.append(f"⚠️ **ÜBERFÄLLIG ({len(overdue)}):**")
+        for content, dl in overdue:
+            try:
+                d = (date.today() - date.fromisoformat(dl)).days
+                lines.append(f"- {content} (seit {d} Tagen, war fällig: {dl})")
+            except Exception:
+                lines.append(f"- {content} (Deadline: {dl})")
+        lines.append("")
+
+    if upcoming:
+        lines.append("📅 **Demnächst fällig:**")
+        for content, dl in upcoming:
+            try:
+                d = (date.fromisoformat(dl) - date.today()).days
+                lines.append(f"- {content} (in {d} Tagen, {dl})")
+            except Exception:
+                lines.append(f"- {content} (Deadline: {dl})")
+        lines.append("")
+
+    if project_infos:
+        lines.append("**Projekte:**")
+        for pname, pdeadline, total, done_cnt, pct, next_task in project_infos:
+            _, _, urg_label, _ = get_urgency(pdeadline)
+            line = f"- {pname}: {done_cnt}/{total} ({pct}%)"
+            if pdeadline:
+                line += f" | Deadline: {pdeadline} {urg_label}"
+            if next_task:
+                line += f" | Nächstes: {next_task}"
+            lines.append(line)
+        lines.append("")
+
+    if insights:
+        lines.append("**Gelernte Muster über den Nutzer:**")
+        for cat, ins, _ in insights:
+            lines.append(f"- [{cat}] {ins}")
+
+    return "\n".join(lines)
+
+
+def save_review(review_type, content, review_date):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('INSERT INTO reviews (review_type, content, review_date, created_at) VALUES (?,?,?,?)',
+              (review_type, content, review_date, now))
+    conn.commit()
+    conn.close()
+
+
+def get_reviews(review_type, limit=5):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id, content, review_date, created_at FROM reviews WHERE review_type=? ORDER BY created_at DESC LIMIT ?',
+              (review_type, limit))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+def save_ki_insight(category, insight):
+    norm = insight.strip().lower()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT id FROM ki_insights WHERE LOWER(insight)=?', (norm,))
+    if not c.fetchone():
+        now = datetime.utcnow().isoformat()
+        c.execute('INSERT INTO ki_insights (category, insight, created_at) VALUES (?,?,?)',
+                  (category, insight.strip(), now))
+        conn.commit()
+    conn.close()
+
+
+def get_ki_insights(limit=20):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('SELECT category, insight, created_at FROM ki_insights ORDER BY created_at DESC LIMIT ?', (limit,))
+    rows = c.fetchall()
+    conn.close()
+    return rows
+
+
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+KIMI_MODEL = "moonshotai/kimi-k2.6"
+
+
+def _ki_stream(client, messages, placeholder, max_tokens=512):
+    """Stream from NVIDIA/Kimi API. Handles empty chunks (IndexError fix)."""
+    full_text = ""
+    stream = client.chat.completions.create(
+        model=KIMI_MODEL, messages=messages, max_tokens=max_tokens, stream=True
+    )
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta and chunk.choices[0].delta.content:
+            full_text += chunk.choices[0].delta.content
+            placeholder.markdown(full_text + "▌")
+    placeholder.markdown(full_text)
+    return full_text
+
+
+def _extract_and_save_insights(client, review_text):
+    """Extract lasting insights about the user from a review (best-effort, silent on error)."""
+    try:
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": "Du extrahierst Erkenntnisse. Antworte NUR im exakten Format, keine weiteren Texte."},
+                {"role": "user", "content": (
+                    "Extrahiere 2-4 langfristige Erkenntnisse über diesen Nutzer.\n"
+                    "Format (eine pro Zeile, kein Zusatztext):\n"
+                    "[MUSTER] Beobachtung\n[STÄRKE] Beobachtung\n[HERAUSFORDERUNG] Beobachtung\n\n"
+                    f"Review:\n{review_text[:2000]}"
+                )}
+            ],
+            max_tokens=200,
+            stream=False
+        )
+        for line in resp.choices[0].message.content.strip().split("\n"):
+            line = line.strip()
+            if line.startswith("[") and "]" in line:
+                end = line.index("]")
+                cat = line[1:end].strip()
+                insight = line[end + 1:].strip()
+                if len(insight) > 5:
+                    save_ki_insight(cat, insight)
+    except Exception:
+        pass
+
+
+def _handle_ki_error(e):
+    err = str(e)
+    if "401" in err or "unauthorized" in err.lower() or "invalid_api_key" in err.lower():
+        st.error("❌ API Key ungültig. Key wurde gelöscht — bitte neu eingeben.")
+        set_setting('nvidia_api_key', '')
+    elif "rate_limit" in err.lower() or "429" in err:
+        st.error("⏱️ Zu viele Anfragen. Kurz warten und nochmal versuchen.")
+    elif "402" in err or "credit" in err.lower() or "quota" in err.lower():
+        st.error("💳 Kostenloses Kontingent aufgebraucht. Neue Credits unter build.nvidia.com holen.")
+    else:
+        st.error(f"❌ Fehler: {err}")
+
+
+def render_ki_coach_page():
+    st.title("🤖 KI Coach")
+
+    try:
+        from openai import OpenAI as _OpenAI
+    except ImportError:
+        st.error("Das `openai` Paket ist nicht installiert.")
+        st.code("pip install openai", language="bash")
+        return
+
+    api_key = get_setting('nvidia_api_key', '')
+
+    if not api_key:
+        st.info(
+            "**Kostenlos starten:** [build.nvidia.com/moonshotai/kimi-k2.6](https://build.nvidia.com/moonshotai/kimi-k2.6) "
+            "→ **Get API Key** → Key eintragen. Gratis Credits beim ersten Anmelden."
+        )
+        with st.form("api_key_form"):
+            new_key = st.text_input("NVIDIA API Key", type="password", placeholder="nvapi-...")
+            if st.form_submit_button("Aktivieren", use_container_width=True):
+                if new_key.strip():
+                    set_setting('nvidia_api_key', new_key.strip())
+                    st.rerun()
+        return
+
+    client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+    with st.expander("⚙️ API Key & Muster", expanded=False):
+        masked = api_key[:10] + "..." + api_key[-4:] if len(api_key) > 14 else "***"
+        insights_count = len(get_ki_insights())
+        st.caption(f"Key: `{masked}` ✅  |  Kimi K2.6  |  {insights_count} gelernte Muster")
+        c1, c2 = st.columns(2)
+        with c1:
+            if st.button("Key löschen", key="ki_del_key"):
+                set_setting('nvidia_api_key', '')
+                for k in ['ki_chat_history']:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.rerun()
+        with c2:
+            if insights_count and st.button("Muster anzeigen", key="ki_show_ins"):
+                st.session_state.ki_show_insights = not st.session_state.get('ki_show_insights', False)
+        if st.session_state.get('ki_show_insights'):
+            for cat, ins, _ in get_ki_insights():
+                st.markdown(f"- **[{cat}]** {ins}")
+
+    base_system = """Du bist ein persönlicher ADHS-Coach für die Kaizen Produktivitäts-App. Du lernst kontinuierlich aus den Daten des Nutzers und wirst über die Zeit immer besser.
+
+Grundregeln:
+- Antworte immer auf Deutsch
+- Sei direkt, ehrlich, motivierend — kein Bullshit, keine leeren Phrasen
+- ADHS-freundlich: eine Sache nach der anderen, keine überladenen Listen
+- Nutze die echten Daten für konkrete, personalisierte Aussagen
+- Emojis sparsam aber gezielt"""
+
+    tab_chat, tab_daily, tab_weekly, tab_journal = st.tabs([
+        "💬 Chat", "📊 KI Daily Review", "📅 KI Weekly Review", "📔 Mein Tagebuch"
+    ])
+
+    with tab_chat:
+        _render_ki_chat_tab(client, base_system)
+    with tab_daily:
+        _render_ki_review_tab(client, "ki_daily", days_back=0, base_system=base_system)
+    with tab_weekly:
+        _render_ki_review_tab(client, "ki_weekly", days_back=6, base_system=base_system)
+    with tab_journal:
+        _render_user_journal_tab()
+
+
+def _render_ki_chat_tab(client, base_system):
+    st.caption("Frag deinen Coach — er kennt alle deine Daten und lernt dich über die Zeit besser kennen.")
+
+    if 'ki_chat_history' not in st.session_state:
+        st.session_state.ki_chat_history = []
+
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("📋 Tages-Briefing", use_container_width=True, key="ki_briefing"):
+            st.session_state.ki_pending = "Gib mir ein kurzes Tages-Briefing. Was ist heute wichtig? Was ist überfällig? Wo stehe ich?"
+    with col2:
+        if st.button("🎯 Was jetzt?", use_container_width=True, key="ki_now"):
+            st.session_state.ki_pending = "Was soll ich jetzt tun? Nenn mir NUR eine Aufgabe mit kurzer Begründung."
+    with col3:
+        if st.button("⚠️ Deadline-Check", use_container_width=True, key="ki_deadlines"):
+            st.session_state.ki_pending = "Analysiere meine Deadlines und Projekte. Was ist kritisch? Was muss heute noch erledigt werden?"
+    with col4:
+        if st.button("🗑️ Chat leeren", use_container_width=True, key="ki_clear"):
+            st.session_state.ki_chat_history = []
+            st.rerun()
+
+    st.markdown("---")
+
+    for msg in st.session_state.ki_chat_history:
+        with st.chat_message(msg['role']):
+            st.markdown(msg['content'])
+
+    pending = None
+    if 'ki_pending' in st.session_state:
+        pending = st.session_state['ki_pending']
+        del st.session_state['ki_pending']
+
+    user_input = st.chat_input("Frag deinen KI Coach...")
+    final_input = pending or user_input
+    if not final_input:
+        return
+
+    with st.chat_message('user'):
+        st.markdown(final_input)
+
+    context = build_ai_context(days_back=0)
+    system = base_system + f"\n\n**Aktuelle Nutzerdaten:**\n{context}"
+    messages = [{"role": "system", "content": system}]
+    for m in st.session_state.ki_chat_history:
+        messages.append({"role": m['role'], "content": m['content']})
+    messages.append({"role": "user", "content": final_input})
+
+    try:
+        with st.chat_message('assistant'):
+            placeholder = st.empty()
+            full_text = _ki_stream(client, messages, placeholder, max_tokens=512)
+        st.session_state.ki_chat_history.append({'role': 'user', 'content': final_input})
+        st.session_state.ki_chat_history.append({'role': 'assistant', 'content': full_text})
+    except Exception as e:
+        _handle_ki_error(e)
+
+
+def _render_ki_review_tab(client, review_type, days_back, base_system):
+    is_weekly = (review_type == "ki_weekly")
+    label = "Wochen" if is_weekly else "Tages"
+    today_str = date.today().isoformat()
+    review_date_key = (date.today() - timedelta(days=days_back)).isoformat() if is_weekly else today_str
+
+    st.caption(
+        f"Vollständige KI-Analyse {'der letzten 7 Tage' if is_weekly else 'von heute'} — "
+        "alle Stats, Muster, Bewertung, Empfehlungen. Die KI lernt mit jedem Review mehr über dich."
+    )
+
+    latest = get_reviews(review_type, limit=1)
+    col_gen, col_info = st.columns([1, 2])
+    with col_gen:
+        generate = st.button(f"🔄 {label}-Review generieren", use_container_width=True, key=f"gen_{review_type}")
+    with col_info:
+        if latest:
+            st.caption(f"Letzter Review: {latest[0][2]} (erstellt {latest[0][3][:10]})")
+        else:
+            st.caption("Noch kein Review vorhanden.")
+
+    if generate:
+        context = build_ai_context(days_back=days_back)
+
+        if is_weekly:
+            prompt = f"""Erstelle einen vollständigen WOCHEN-REVIEW. Nutze ausschließlich die echten Daten.
+
+## 📊 Wochenstatistiken
+[Zahlen & Fakten: Tasks erledigt/offen, Zeit investiert, Punkte, Level, Projektfortschritt]
+
+## 🏆 Was diese Woche gut lief
+[Konkrete Erfolge mit echten Task-Namen, positive Muster]
+
+## ⚠️ Herausforderungen & Misses
+[Was nicht geklappt hat, überfällige Aufgaben — ehrlich aber konstruktiv]
+
+## 📈 Trends & Muster
+[Beste/schlechteste Tage, Aufgabentyp-Präferenzen, Deadline-Verhalten, Energiemuster]
+
+## 🎯 Projekte-Status
+[Fortschritt bei jedem aktiven Projekt, Risiken, Priorisierung]
+
+## 💡 Was ich über dich gelernt habe
+[2-3 neue oder bestätigte Erkenntnisse über Arbeitsweise, Stärken, Herausforderungen]
+
+## 🚀 Empfehlungen für nächste Woche
+[Maximal 3 konkrete, umsetzbare Maßnahmen — priorisiert]
+
+## 💪 Gesamtbewertung
+[Ehrliche Einschätzung mit Motivationsboost, 2-3 Sätze]
+
+Daten:
+{context}"""
+        else:
+            prompt = f"""Erstelle einen vollständigen TAGES-REVIEW. Nutze ausschließlich die echten Daten.
+
+## 📊 Zahlen des Tages
+[Tasks erledigt/offen, Zeit investiert, Punkte verdient, Level-Stand, Routinen erledigt]
+
+## ✅ Was heute gut lief
+[Konkrete Erfolge mit echten Task-Namen, positive Muster des Tages]
+
+## 🔴 Was nicht geschafft wurde
+[Offene Tasks, Überfälligkeiten — ehrlich, nicht vernichtend, lösungsorientiert]
+
+## 🔍 Analyse & Muster
+[Warum hat es gut/schlecht geklappt? Aufgabentyp-Insights? Energiemuster?]
+
+## 🎯 Projekte & Deadlines
+[Status aktiver Projekte, kritische Fristen, nächste Schritte]
+
+## 🚀 Empfehlungen für morgen
+[Maximal 3 konkrete Aktionen, priorisiert nach Wichtigkeit]
+
+## 💪 Gesamtbewertung des Tages
+[Motivierende, ehrliche Einschätzung — 2-3 Sätze]
+
+Daten:
+{context}"""
+
+        messages = [
+            {"role": "system", "content": base_system + "\nDu erstellst einen detaillierten Produktivitäts-Review. Sei ausführlich, konkret, nutze alle Daten."},
+            {"role": "user", "content": prompt}
+        ]
+
+        try:
+            with st.container():
+                placeholder = st.empty()
+                full_text = _ki_stream(client, messages, placeholder, max_tokens=1500)
+            save_review(review_type, full_text, review_date_key)
+            _extract_and_save_insights(client, full_text)
+            st.success(f"✅ {label}-Review gespeichert — neue Muster gelernt!")
+            st.rerun()
+        except Exception as e:
+            _handle_ki_error(e)
+        return
+
+    if latest:
+        rev_id, content, rev_date, created_at = latest[0]
+        st.markdown(f"*Review vom {rev_date} — erstellt {created_at[:10]}*")
+        st.markdown("---")
+        st.markdown(content)
+        all_reviews = get_reviews(review_type, limit=10)
+        if len(all_reviews) > 1:
+            with st.expander(f"📁 Ältere {label}-Reviews ({len(all_reviews) - 1} weitere)"):
+                for rev in all_reviews[1:]:
+                    with st.expander(f"{rev[2]} — {rev[3][:10]}"):
+                        st.markdown(rev[1])
+    else:
+        st.info(f"Noch kein {label}-Review vorhanden. Klick auf **{label}-Review generieren** um zu starten.")
+
+
+def _render_user_journal_tab():
+    st.caption("Dein persönlicher Raum — Brain Dumps, Reflexionen, was dich wirklich bewegt.")
+
+    subtab_daily, subtab_weekly, subtab_history = st.tabs(["📝 Heute", "📅 Diese Woche", "📁 Verlauf"])
+
+    with subtab_daily:
+        st.subheader(f"Tages-Reflexion — {date.today().strftime('%d.%m.%Y')}")
+        today_journal = get_reviews('user_daily', limit=1)
+        today_exists = today_journal and today_journal[0][2] == date.today().isoformat()
+
+        if today_exists and not st.session_state.get('journal_edit_daily'):
+            st.success("✅ Heute bereits geschrieben.")
+            st.markdown(today_journal[0][1])
+            if st.button("✏️ Überschreiben", key="journal_overwrite_daily"):
+                st.session_state.journal_edit_daily = True
+                st.rerun()
+        else:
+            with st.form("user_daily_journal"):
+                mood = st.select_slider("Wie war dein Tag?",
+                    options=["😫 Sehr schlecht", "😕 Schlecht", "😐 Okay", "🙂 Gut", "😊 Super"],
+                    value="😐 Okay")
+                happened = st.text_area("Brain Dump — Alles raus:", height=120,
+                                         placeholder="Was hat dich heute beschäftigt? Gedanken, Gefühle, Erlebnisse — ohne Filter")
+                went_well = st.text_area("Was lief gut?", height=80,
+                                          placeholder="Auch kleine Dinge zählen...")
+                was_hard = st.text_area("Was war schwierig?", height=80,
+                                         placeholder="Ehrlich reflektieren, ohne Selbstkritik")
+                tomorrow = st.text_area("Intention für morgen:", height=60,
+                                         placeholder="Eine Sache, die morgen wirklich wichtig ist...")
+                if st.form_submit_button("💾 Speichern", use_container_width=True):
+                    content = f"**Stimmung:** {mood}\n\n"
+                    if happened.strip():
+                        content += f"**Brain Dump:**\n{happened}\n\n"
+                    if went_well.strip():
+                        content += f"**Was gut lief:**\n{went_well}\n\n"
+                    if was_hard.strip():
+                        content += f"**Was schwierig war:**\n{was_hard}\n\n"
+                    if tomorrow.strip():
+                        content += f"**Intention für morgen:**\n{tomorrow}"
+                    save_review('user_daily', content.strip(), date.today().isoformat())
+                    if 'journal_edit_daily' in st.session_state:
+                        del st.session_state['journal_edit_daily']
+                    st.rerun()
+
+    with subtab_weekly:
+        week_start = (date.today() - timedelta(days=date.today().weekday())).isoformat()
+        st.subheader(f"Wochen-Reflexion — KW ab {week_start}")
+        week_journal = get_reviews('user_weekly', limit=1)
+        week_exists = week_journal and week_journal[0][2] == week_start
+
+        if week_exists and not st.session_state.get('journal_edit_weekly'):
+            st.success("✅ Diese Woche bereits geschrieben.")
+            st.markdown(week_journal[0][1])
+            if st.button("✏️ Überschreiben", key="journal_overwrite_weekly"):
+                st.session_state.journal_edit_weekly = True
+                st.rerun()
+        else:
+            with st.form("user_weekly_journal"):
+                mood_week = st.select_slider("Wie war deine Woche?",
+                    options=["😫 Sehr schlecht", "😕 Schlecht", "😐 Okay", "🙂 Gut", "😊 Super"],
+                    value="😐 Okay")
+                week_dump = st.text_area("Wochen-Braindump:", height=150,
+                                          placeholder="Alles raus: Projekte, Gedanken, Gefühle, Beobachtungen der Woche...")
+                week_wins = st.text_area("Top Wins der Woche:", height=80,
+                                          placeholder="Was hast du diese Woche wirklich erreicht?")
+                week_learn = st.text_area("Was habe ich über mich gelernt?", height=80,
+                                           placeholder="Erkenntnisse, Muster, Überraschungen...")
+                next_week_goal = st.text_area("Fokus für nächste Woche:", height=60,
+                                               placeholder="Ein großes Ziel oder Thema für die kommende Woche...")
+                if st.form_submit_button("💾 Speichern", use_container_width=True):
+                    content = f"**Stimmung:** {mood_week}\n\n"
+                    if week_dump.strip():
+                        content += f"**Wochen-Braindump:**\n{week_dump}\n\n"
+                    if week_wins.strip():
+                        content += f"**Top Wins:**\n{week_wins}\n\n"
+                    if week_learn.strip():
+                        content += f"**Erkenntnisse:**\n{week_learn}\n\n"
+                    if next_week_goal.strip():
+                        content += f"**Fokus nächste Woche:**\n{next_week_goal}"
+                    save_review('user_weekly', content.strip(), week_start)
+                    if 'journal_edit_weekly' in st.session_state:
+                        del st.session_state['journal_edit_weekly']
+                    st.rerun()
+
+    with subtab_history:
+        st.subheader("Verlauf")
+        hist_type = st.selectbox("Typ", ["Tages-Reflexionen", "Wochen-Reflexionen"], key="journal_hist_type")
+        rtype = "user_daily" if hist_type == "Tages-Reflexionen" else "user_weekly"
+        past = get_reviews(rtype, limit=20)
+        if not past:
+            st.info("Noch keine Einträge vorhanden.")
+        else:
+            for rev in past:
+                with st.expander(f"📅 {rev[2]} — {rev[3][:10]}"):
+                    st.markdown(rev[1])
+
+
 # ========== SHARED CSS ==========
 
 URGENCY_CSS = """<style>
@@ -719,7 +2249,9 @@ def render_planen_page():
     rows = get_today_entries()
     has_brain     = any(r[1] == "brain"     for r in rows)
     has_highlight = any(r[1] == "highlight" for r in rows)
-    has_micro     = any(r[1] == "micro"     for r in rows)
+    # Micro is now attached to the highlight's micro_action field
+    today_highlight = next((r for r in rows if r[1] == "highlight"), None)
+    has_micro     = bool(today_highlight and today_highlight[14])
     steps_done    = sum([has_brain, has_highlight, has_micro])
 
     st.progress(steps_done / 3, text=f"Schritt {steps_done} von 3 abgeschlossen")
@@ -769,19 +2301,473 @@ def render_planen_page():
                     st.session_state.page = "Tagesfokus"
                     st.rerun()
 
-    # Step 3: Micro-Commitment
-    step3_label = "✅ Micro-Commitment hinzugefügt" if has_micro else "3️⃣  Micro-Commitment — 2 Minuten"
+    # Step 3: Micro-Commitment (linked to today's Highlight)
+    current_micro = today_highlight[14] if today_highlight else None
+    if current_micro:
+        step3_label = f"✅ Micro-Commitment: \"{current_micro}\""
+    else:
+        step3_label = "3️⃣  Micro-Commitment — Wie startest du?"
     with st.expander(step3_label, expanded=has_highlight and not has_micro):
-        with st.form("micro_form"):
-            micro = st.text_input("Was kannst du in 2 Minuten starten?",
-                                   placeholder="z.B. E-Mail öffnen, Notiz anlegen...")
-            tags_mc = st.text_input("Tags (optional)")
-            date_input_mc = st.date_input("Datum", value=date.today(), key="mc_date")
-            deadline_mc = _deadline_fields("mc")
-            if st.form_submit_button("Hinzufügen & Fokus starten"):
-                if micro.strip():
-                    add_entry("micro", micro.strip(), tags=tags_mc,
-                               entry_date=date_input_mc.isoformat(), deadline=deadline_mc)
+        if not has_highlight:
+            st.info("Zuerst ein Daily Highlight setzen (Schritt 2).")
+        else:
+            hl_content = today_highlight[2] if today_highlight else ""
+            st.markdown(f"**Aufgabe:** {hl_content}")
+            st.caption("Was ist die kleinste Aktion (≤2 min) um diese Aufgabe zu starten?")
+            with st.form("micro_form"):
+                micro = st.text_input(
+                    "Starten mit...",
+                    value=current_micro or "",
+                    placeholder="z.B. Dokument öffnen, E-Mail schreiben, Notiz anlegen..."
+                )
+                if st.form_submit_button("Speichern & Fokus starten"):
+                    if micro.strip() and today_highlight:
+                        conn_mc = sqlite3.connect(DB_PATH)
+                        conn_mc.execute("UPDATE entries SET micro_action=? WHERE id=?",
+                                        (micro.strip(), today_highlight[0]))
+                        conn_mc.commit()
+                        conn_mc.close()
+                        st.session_state.page = "Tagesfokus"
+                        st.rerun()
+
+
+HABIT_ICONS = ["💧","🏋️","📚","🧘","🏃","✍️","🎯","🍎","😴","💊","🌿","🎵","💻","🙏","❤️","🌞",
+               "🥗","🧠","🦷","🛁","📝","🎨","🎤","🏊","🚴","🤸","🧹","🛌","📞","💰"]
+
+
+def adaptive_score(completion_pct, energy_pct):
+    """50% Energie + 50% Completion = 100% adaptiver Score."""
+    if energy_pct <= 0:
+        return 0
+    return round(completion_pct / energy_pct * 100)
+
+
+def get_habit_streak(habit_id):
+    today_d = date.today()
+    logs = get_habit_logs_range(habit_id, 365)
+    log_dict = {l['log_date']: adaptive_score(l['completion_pct'], l['energy_level']) for l in logs}
+
+    current = 0
+    for i in range(365):
+        d = (today_d - timedelta(days=i)).isoformat()
+        s = log_dict.get(d, -1)
+        if s == -1:
+            if i == 0:
+                continue
+            break
+        if s >= 80:
+            current += 1
+        else:
+            if i > 0:
+                break
+
+    best = tmp = 0
+    prev_d = None
+    for ld in sorted(log_dict.keys()):
+        if log_dict[ld] >= 80:
+            if prev_d and (date.fromisoformat(ld) - date.fromisoformat(prev_d)).days == 1:
+                tmp += 1
+            else:
+                tmp = 1
+            best = max(best, tmp)
+        else:
+            tmp = 0
+        prev_d = ld
+    return current, best
+
+
+def _habit_ring_html(habit, score, completion_pct):
+    r, cx, cy = 36, 44, 44
+    circ = 2 * 3.14159265 * r
+    off = circ * (1 - min(100, completion_pct) / 100)
+
+    if score >= 120:
+        ring_col = "#ff00ff"; glow = "0 0 14px #ff00ff,0 0 28px #ff00ff55"
+    elif score >= 100:
+        ring_col = "#00ff88"; glow = "0 0 10px #00ff88,0 0 20px #00ff8855"
+    elif score >= 80:
+        ring_col = habit['color']; glow = f"0 0 8px {habit['color']}"
+    elif score >= 50:
+        ring_col = "#ffd700"; glow = ""
+    elif score >= 25:
+        ring_col = "#ff9500"; glow = ""
+    else:
+        ring_col = "rgba(255,255,255,0.18)"; glow = ""
+
+    flt = f"drop-shadow({glow})" if glow else "none"
+
+    score_badge = ""
+    if score >= 120:
+        score_badge = f'<text x="{cx}" y="{cy+15}" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="#ff00ff" font-weight="900">ÜBER-POWER!</text>'
+    elif score >= 100:
+        score_badge = f'<text x="{cx}" y="{cy+15}" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="#00ff88" font-weight="900">100%+ 🚀</text>'
+    else:
+        score_badge = f'<text x="{cx}" y="{cy+15}" text-anchor="middle" dominant-baseline="middle" font-size="11" fill="{ring_col}" font-weight="700">{score}%</text>'
+
+    return f"""<div style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:4px 0">
+<svg width="88" height="88" style="filter:{flt};overflow:visible">
+  <circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="rgba(255,255,255,0.07)" stroke-width="7"/>
+  <circle cx="{cx}" cy="{cy}" r="{r}" fill="none" stroke="{ring_col}" stroke-width="7"
+    stroke-linecap="round" stroke-dasharray="{circ:.1f}" stroke-dashoffset="{off:.1f}"
+    transform="rotate(-90 {cx} {cy})"/>
+  <text x="{cx}" y="{cy-5}" text-anchor="middle" dominant-baseline="middle" font-size="22">{habit['icon']}</text>
+  {score_badge}
+</svg>
+<div style="font-size:12px;text-align:center;color:rgba(255,255,255,0.85);max-width:88px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{habit['name']}</div>
+</div>"""
+
+
+def _habit_heatmap_html(habit, days=84):
+    today_d = date.today()
+    logs = get_habit_logs_range(habit['id'], days)
+    log_dict = {l['log_date']: adaptive_score(l['completion_pct'], l['energy_level']) for l in logs}
+    current_streak, best_streak = get_habit_streak(habit['id'])
+
+    def cell_color(s):
+        if s is None: return "rgba(255,255,255,0.05)"
+        if s >= 120: return "#ff00ff"
+        if s >= 100: return "#00ff88"
+        if s >= 80: return habit['color']
+        if s >= 50: return "#ffd700"
+        if s >= 25: return "#ff9500"
+        if s > 0: return "#ff4444"
+        return "rgba(255,255,255,0.05)"
+
+    cells = ""
+    for i in range(days - 1, -1, -1):
+        d = today_d - timedelta(days=i)
+        s = log_dict.get(d.isoformat(), None)
+        c = cell_color(s)
+        tip = f"{d.strftime('%d.%m')}: {s}%" if s is not None else f"{d.strftime('%d.%m')}: —"
+        cells += f'<div title="{tip}" style="width:14px;height:14px;background:{c};border-radius:2px;flex-shrink:0"></div>'
+
+    fire_badge = f'<span style="background:linear-gradient(135deg,#ff6b00,#ffcc00);color:#000;font-size:11px;font-weight:800;padding:2px 8px;border-radius:20px">🔥 {current_streak}</span>' if current_streak > 0 else '<span style="color:rgba(255,255,255,0.3);font-size:12px">0 Tage Streak</span>'
+    best_txt = f'<span style="color:rgba(255,255,255,0.35);font-size:11px">· Rekord: {best_streak} 🏆</span>' if best_streak > 0 else ""
+
+    return f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 16px;
+  border:1px solid rgba(255,255,255,0.07);margin-bottom:10px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <span style="font-size:20px">{habit['icon']}</span>
+    <span style="font-weight:600;color:white;font-size:13px">{habit['name']}</span>
+    {fire_badge} {best_txt}
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:3px;width:calc(14*(14px + 3px))">
+    {cells}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:10px;color:rgba(255,255,255,0.3)">
+    <span>wenig</span>
+    <div style="width:10px;height:10px;background:#ff4444;border-radius:2px"></div>
+    <div style="width:10px;height:10px;background:#ff9500;border-radius:2px"></div>
+    <div style="width:10px;height:10px;background:{habit['color']};border-radius:2px"></div>
+    <div style="width:10px;height:10px;background:#00ff88;border-radius:2px"></div>
+    <div style="width:10px;height:10px;background:#ff00ff;border-radius:2px"></div>
+    <span>mehr / Über-Power</span>
+  </div>
+</div>"""
+
+
+def _render_habit_streaks(habits):
+    streak_data = []
+    for h in habits:
+        cur, best = get_habit_streak(h['id'])
+        logs30 = get_habit_logs_range(h['id'], 30)
+        high = sum(1 for l in logs30 if adaptive_score(l['completion_pct'], l['energy_level']) >= 80)
+        streak_data.append({'h': h, 'cur': cur, 'best': best, 'consistency': round(high / 30 * 100)})
+    streak_data.sort(key=lambda x: -x['cur'])
+
+    for s in streak_data:
+        h, cur, best, cons = s['h'], s['cur'], s['best'], s['consistency']
+        fire_count = min(5, max(1, cur // 3)) if cur > 0 else 0
+        fires = "🔥" * fire_count
+
+        if cur == 0: lvl, lc = "Noch nicht gestartet", "#666"
+        elif cur < 3: lvl, lc = "Aufwärmen", "#ff9500"
+        elif cur < 7: lvl, lc = "Im Fluss", "#ffd700"
+        elif cur < 14: lvl, lc = "Auf Kurs", "#00d4ff"
+        elif cur < 30: lvl, lc = "🔥 Unaufhaltsam", "#00ff88"
+        else: lvl, lc = "👑 LEGEND", "#ff00ff"
+
+        st.markdown(f"""<div style="display:flex;align-items:center;gap:16px;padding:14px 18px;
+            background:rgba(255,255,255,0.04);border-radius:12px;
+            border:1px solid rgba(255,255,255,0.08);margin-bottom:10px;
+            border-left:4px solid {h['color']}">
+          <span style="font-size:32px">{h['icon']}</span>
+          <div style="flex:1;min-width:0">
+            <div style="font-weight:600;color:white;font-size:14px">{h['name']}</div>
+            <div style="color:rgba(255,255,255,0.4);font-size:12px;margin-top:3px">
+              30-Tage-Konsistenz: <strong style="color:rgba(255,255,255,0.7)">{cons}%</strong> ·
+              Rekord: <strong style="color:rgba(255,255,255,0.7)">{best} Tage</strong>
+            </div>
+          </div>
+          <div style="text-align:center;min-width:80px">
+            <div style="font-size:28px;line-height:1.1">{fires if cur > 0 else "⭕"}</div>
+            <div style="font-size:28px;font-weight:900;color:{lc};line-height:1.2">{cur}</div>
+            <div style="font-size:10px;color:{lc};font-weight:700;text-transform:uppercase;letter-spacing:1px">{lvl}</div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+
+
+def _render_habit_radar(habits):
+    today_d = date.today()
+    names, scores = [], []
+    for h in habits:
+        week_sc = []
+        for i in range(7):
+            d = (today_d - timedelta(days=i)).isoformat()
+            log = get_habit_log(h['id'], d)
+            if log:
+                week_sc.append(adaptive_score(log['completion_pct'], log['energy_level']))
+        avg = sum(week_sc) / max(len(week_sc), 1) if week_sc else 0
+        names.append(h['icon'] + ' ' + h['name'])
+        scores.append(avg)
+
+    if len(habits) < 3:
+        st.info("Mindestens 3 Habits für den Radar benötigt.")
+        return
+
+    sc = scores + [scores[0]]
+    nm = names + [names[0]]
+    fig = go.Figure(go.Scatterpolar(
+        r=sc, theta=nm, fill='toself',
+        fillcolor='rgba(0,212,255,0.12)',
+        line=dict(color='#00d4ff', width=2.5),
+        marker=dict(size=7, color='#00d4ff')
+    ))
+    fig.update_layout(
+        polar=dict(
+            bgcolor='rgba(0,0,0,0)',
+            radialaxis=dict(visible=True, range=[0, 120],
+                            gridcolor='rgba(255,255,255,0.1)',
+                            linecolor='rgba(255,255,255,0.1)',
+                            tickfont=dict(color='rgba(255,255,255,0.35)', size=9)),
+            angularaxis=dict(gridcolor='rgba(255,255,255,0.1)',
+                             linecolor='rgba(255,255,255,0.1)',
+                             tickfont=dict(color='white', size=11))
+        ),
+        paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)',
+        font=dict(color='white'), showlegend=False,
+        margin=dict(t=30, b=30, l=60, r=60), height=400
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("7-Tage-Durchschnitt · 100% = Ziel bei gegebener Energie vollständig erreicht")
+
+
+def _render_habit_momentum(habits):
+    today_d = date.today()
+    COLORS = ['#00d4ff','#ff6b6b','#ffd700','#00ff88','#ff00ff','#ff9500','#7fff00']
+    fig = go.Figure()
+
+    for i, h in enumerate(habits):
+        logs = get_habit_logs_range(h['id'], 37)
+        log_dict = {l['log_date']: adaptive_score(l['completion_pct'], l['energy_level']) for l in logs}
+        dates, avgs = [], []
+        for j in range(29, -1, -1):
+            d = today_d - timedelta(days=j)
+            window = [log_dict[(d - timedelta(days=k)).isoformat()]
+                      for k in range(7) if (d - timedelta(days=k)).isoformat() in log_dict]
+            dates.append(d.isoformat())
+            avgs.append(round(sum(window) / len(window), 1) if window else 0)
+
+        col = COLORS[i % len(COLORS)]
+        fig.add_trace(go.Scatter(
+            x=dates, y=avgs, mode='lines',
+            name=h['icon'] + ' ' + h['name'],
+            line=dict(color=col, width=2.5),
+            fill='tozeroy', fillcolor=f'rgba({int(col[1:3],16)},{int(col[3:5],16)},{int(col[5:7],16)},0.09)'
+        ))
+
+    fig.add_hline(y=80, line_dash="dot", line_color="rgba(255,255,255,0.25)",
+                   annotation_text="80% Ziel", annotation_position="right",
+                   annotation_font=dict(color="rgba(255,255,255,0.4)", size=10))
+    fig.update_layout(
+        template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
+        plot_bgcolor='rgba(5,8,15,0.4)',
+        yaxis=dict(title='Adapt. Score', range=[0, 130], gridcolor='rgba(255,255,255,0.05)'),
+        xaxis=dict(gridcolor='rgba(255,255,255,0.05)'),
+        hovermode='x unified', margin=dict(t=10, b=40, l=50, r=20), height=340,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption("7-Tage gleitender Durchschnitt des adaptiven Scores · Strichlinie = 80% Schwelle")
+
+
+def _clear_focus_mode():
+    for k in ['focus_task_id', 'focus_task_name', 'focus_task_estimate',
+              'focus_phase', 'focus_round', 'focus_pomodoro_start',
+              'focus_total_seconds', 'focus_ki_review', 'focus_status',
+              'focus_blocker', 'focus_run_ki']:
+        if k in st.session_state:
+            del st.session_state[k]
+
+
+def _render_focus_mode():
+    phase = st.session_state.get('focus_phase', 'confirm')
+    task_id = st.session_state.get('focus_task_id')
+    task_name = st.session_state.get('focus_task_name', '?')
+    task_estimate = st.session_state.get('focus_task_estimate', 25)
+
+    st.markdown("""<style>
+    .focus-hdr{text-align:center;font-size:12px;letter-spacing:3px;text-transform:uppercase;
+               color:#00d4ff;opacity:.7;padding:10px 0 4px}
+    .focus-task{text-align:center;font-size:22px;font-weight:700;padding:8px 0 16px}
+    .pomo-time{text-align:center;font-size:76px;font-weight:900;color:#00d4ff;
+               letter-spacing:4px;line-height:1;padding:16px 0}
+    </style>""", unsafe_allow_html=True)
+
+    _, center, _ = st.columns([0.5, 3, 0.5])
+
+    # ── Phase 1: Anti-Distraktion Bestätigung ──────────────────────
+    if phase == 'confirm':
+        with center:
+            st.markdown('<div class="focus-hdr">🎯 Fokus Modus</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="focus-task">{task_name}</div>', unsafe_allow_html=True)
+            st.markdown("---")
+            st.markdown("##### Bevor du startest:")
+            c1 = st.checkbox("📵 Handy auf lautlos / umgedreht", key="fc_phone")
+            c2 = st.checkbox("🔕 Benachrichtigungen aus", key="fc_notif")
+            c3 = st.checkbox("💻 Unnötige Tabs geschlossen", key="fc_tabs")
+            c4 = st.checkbox("💧 Wasser/Kaffee dabei", key="fc_water")
+            st.write("")
+            if c1 and c2 and c3 and c4:
+                if st.button("🚀 JETZT STARTEN", use_container_width=True, type="primary"):
+                    start_task(task_id)
+                    st.session_state.focus_phase = 'pomodoro'
+                    st.session_state.focus_round = 1
+                    st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
+                    st.session_state.focus_total_seconds = 0
+                    st.rerun()
+            else:
+                st.button("✅ Alle Häkchen setzen zum Starten", disabled=True, use_container_width=True)
+            st.write("")
+            if st.button("← Abbrechen", use_container_width=True, key="fc_cancel_confirm"):
+                _clear_focus_mode()
+                st.rerun()
+
+    # ── Phase 2: Pomodoro Countdown ─────────────────────────────────
+    elif phase == 'pomodoro':
+        round_num = st.session_state.get('focus_round', 1)
+        start_str = st.session_state.get('focus_pomodoro_start', datetime.utcnow().isoformat())
+        try:
+            elapsed = int((datetime.utcnow() - datetime.fromisoformat(start_str)).total_seconds())
+        except Exception:
+            elapsed = 0
+        remaining = max(0, POMODORO_DURATION - elapsed)
+        mins, secs = remaining // 60, remaining % 60
+        pct = min(1.0, elapsed / POMODORO_DURATION)
+
+        with center:
+            st.markdown(f'<div class="focus-hdr">🎯 FOKUS — Runde {round_num}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="focus-task">{task_name}</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="pomo-time">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+            st.progress(pct)
+            if remaining == 0:
+                st.success("⏰ 25 Minuten voll! Wie weiter?")
+            st.write("")
+            btn1, btn2, btn3 = st.columns(3)
+            with btn1:
+                if st.button("✅ Aufgabe fertig", use_container_width=True, type="primary"):
+                    done_secs = st.session_state.get('focus_total_seconds', 0) + (POMODORO_DURATION - remaining)
+                    toggle_done(task_id, True, elapsed_seconds=done_secs,
+                                points=compute_points(done_secs, task_estimate))
+                    st.session_state.focus_phase = 'review'
+                    st.session_state.focus_total_seconds = done_secs
+                    st.rerun()
+            with btn2:
+                if st.button("🔄 Noch eine Runde", use_container_width=True):
+                    prev = st.session_state.get('focus_total_seconds', 0)
+                    st.session_state.focus_total_seconds = prev + (POMODORO_DURATION - remaining)
+                    st.session_state.focus_round = round_num + 1
+                    st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
+                    st.rerun()
+            with btn3:
+                if st.button("🚫 Abbrechen", use_container_width=True):
+                    _clear_focus_mode()
+                    st.rerun()
+
+        if remaining > 0:
+            time.sleep(1)
+            st.rerun()
+
+    # ── Phase 3: KI Review ──────────────────────────────────────────
+    elif phase == 'review':
+        round_num = st.session_state.get('focus_round', 1)
+        total_secs = st.session_state.get('focus_total_seconds', 0)
+        total_mins = max(1, total_secs // 60)
+
+        with center:
+            st.markdown('<div class="focus-hdr">✅ SESSION BEENDET</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="focus-task">{task_name}</div>', unsafe_allow_html=True)
+            st.markdown(f"**Gearbeitet:** {total_mins} Min · {round_num} {'Runde' if round_num == 1 else 'Runden'}")
+            st.markdown("---")
+
+            if not st.session_state.get('focus_ki_review') and not st.session_state.get('focus_run_ki'):
+                st.markdown("##### Status-Update für deinen KI Coach:")
+                with st.form("focus_review_form"):
+                    status = st.text_area("Wo stehst du? Was wurde geschafft?", height=100,
+                                           placeholder="z.B. 'Hälfte der Implementierung fertig, noch Bugfixes offen'")
+                    blocker = st.text_area("Was blockiert dich? (optional)", height=60,
+                                            placeholder="z.B. 'Technisches Problem mit Y'")
+                    if st.form_submit_button("🤖 KI Analyse starten", use_container_width=True):
+                        st.session_state.focus_status = status
+                        st.session_state.focus_blocker = blocker
+                        st.session_state.focus_run_ki = True
+                        st.rerun()
+
+            if st.session_state.get('focus_run_ki') and not st.session_state.get('focus_ki_review'):
+                if 'focus_run_ki' in st.session_state:
+                    del st.session_state['focus_run_ki']
+                api_key = get_setting('nvidia_api_key', '')
+                if api_key:
+                    try:
+                        from openai import OpenAI as _OpenAI
+                        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+                        context = build_ai_context(days_back=0)
+                        status = st.session_state.get('focus_status', '')
+                        blocker = st.session_state.get('focus_blocker', '')
+                        msgs = [
+                            {"role": "system", "content": "Du bist ein ADHS-Coach. Antworte kurz, direkt, auf Deutsch."},
+                            {"role": "user", "content": (
+                                f"Fokus-Session beendet.\n"
+                                f"Aufgabe: {task_name}\n"
+                                f"Gearbeitet: {total_mins} Min ({round_num} Runden)\n"
+                                f"Status: {status}\nBlocker: {blocker or 'keiner'}\n\n"
+                                f"Kontext:\n{context}\n\n"
+                                "Antworte mit genau:\n"
+                                "**Wo du stehst:** (1-2 Sätze)\n"
+                                "**Nächster Schritt morgen:** (1 konkrete Aktion)\n"
+                                "**Geschätzte Zeit:** (X Minuten)\n"
+                                "Max. 80 Wörter."
+                            )}
+                        ]
+                        placeholder_ki = st.empty()
+                        ki_text = _ki_stream(client, msgs, placeholder_ki, max_tokens=250)
+                        st.session_state.focus_ki_review = ki_text
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"KI Fehler: {e}")
+                else:
+                    st.warning("Kein NVIDIA API Key gesetzt — geh zu 'KI Coach' um einen einzutragen.")
+
+            if st.session_state.get('focus_ki_review'):
+                st.markdown("##### 🤖 KI Coach:")
+                st.info(st.session_state.focus_ki_review)
+                st.write("")
+                ca, cb = st.columns(2)
+                with ca:
+                    if st.button("📅 Nächsten Schritt für morgen einplanen", use_container_width=True, type="primary"):
+                        tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+                        add_entry("brain", f"Weiter: {task_name}", tags="fokus,follow-up",
+                                  estimate=30, entry_date=tomorrow_str)
+                        st.success("✅ Für morgen eingeplant!")
+                with cb:
+                    if st.button("Fertig → Tagesfokus", use_container_width=True):
+                        _clear_focus_mode()
+                        st.session_state.page = "Tagesfokus"
+                        st.rerun()
+            elif not st.session_state.get('focus_run_ki'):
+                if st.button("← Ohne KI Review zurück", use_container_width=True):
+                    _clear_focus_mode()
                     st.session_state.page = "Tagesfokus"
                     st.rerun()
 
@@ -823,20 +2809,39 @@ def render_tagesfokus_page():
         return
 
     highlights = [r for r in rows if r[1] == "highlight"]
-    micros     = [r for r in rows if r[1] == "micro"]
-    brains     = [r for r in rows if r[1] == "brain"]
+    brains     = [r for r in rows if r[1] in ("brain", "micro")]
+    categories = get_categories()
+    cat_map    = {c['id']: c for c in categories}
 
-    def render_row(r, css_class, pfx):
-        eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at, deadline = r
+    def _set_micro(entry_id, text):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("UPDATE entries SET micro_action=? WHERE id=?", (text or None, entry_id))
+        conn.commit()
+        conn.close()
+
+    def render_row(r, css_class, pfx, show_category_controls=True):
+        eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, \
+            completed_at, elapsed_seconds, started_at, deadline, micro_action, category_id = r
         urg_level, urg_days, urg_label, urg_class = get_urgency(deadline)
+        cat = cat_map.get(category_id)
+
         card_cls = f"{css_class} fok-done" if done else css_class
         dl_html = f'<span class="dl-badge">{urg_label}</span>' if urg_label and not done else ""
+        cat_html = (f'<span style="background:{cat["color"]}28;color:{cat["color"]};'
+                    f'font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;'
+                    f'border:1px solid {cat["color"]}55;margin-left:6px">'
+                    f'{cat["icon"]} {cat["name"]}</span>' if cat and not done else "")
+        micro_html = (f'<br><span style="font-size:11px;color:#00ff88;opacity:.9">'
+                      f'⚡ Starten mit: <em>{micro_action}</em></span>'
+                      if micro_action and not done else "")
+
         st.markdown(
-            f'<div class="{card_cls}"><strong>{content}</strong>{dl_html}'
-            + (f'<br><small style="opacity:.6">ca. {estimate} min</small>' if estimate else "")
+            f'<div class="{card_cls}"><strong>{content}</strong>{dl_html}{cat_html}{micro_html}'
+            + (f'<br><small style="opacity:.55">ca. {estimate} min</small>' if estimate else "")
             + "</div>", unsafe_allow_html=True
         )
-        c_chk, c_btn, _ = st.columns([0.08, 0.22, 0.70])
+
+        c_chk, c_btn, c_fok, _ = st.columns([0.08, 0.18, 0.16, 0.58])
         with c_chk:
             new_done = st.checkbox("", value=bool(done), key=f"{pfx}_chk_{eid}",
                                    label_visibility="collapsed")
@@ -871,37 +2876,151 @@ def render_tagesfokus_page():
                     if st.button("Start", key=f"{pfx}_start_{eid}"):
                         start_task(eid)
                         st.rerun()
-
-    if highlights:
-        st.markdown("### ⭐ Daily Highlight")
-        for r in highlights:
-            render_row(r, "fok-hl", "hl")
-
-    if micros:
-        st.markdown("### ⏱️ Micro-Commitments")
-        for r in micros:
-            render_row(r, "fok-mc", "mc")
-
-    if brains:
-        st.markdown("### 📝 To-Do Liste")
-        for r in brains:
-            render_row(r, "fok-br", "br")
-
-    st.markdown("---")
-    with st.expander("➕ Aufgabe schnell hinzufügen"):
-        with st.form("fok_quick_add"):
-            col1, col2 = st.columns([3, 1])
-            with col1:
-                new_task = st.text_input("Aufgabe", label_visibility="collapsed",
-                                          placeholder="Neue Aufgabe...")
-            with col2:
-                task_type = st.selectbox("Typ", ["micro", "brain", "highlight"],
-                                          label_visibility="collapsed")
-            if st.form_submit_button("Hinzufügen", use_container_width=True):
-                if new_task.strip():
-                    add_entry(task_type, new_task.strip(),
-                               estimate=predict_duration(task_type))
+        with c_fok:
+            if not done:
+                if st.button("🎯 Fokus", key=f"{pfx}_fok_{eid}", use_container_width=True):
+                    st.session_state.focus_task_id = eid
+                    st.session_state.focus_task_name = content
+                    st.session_state.focus_task_estimate = estimate or 25
+                    st.session_state.focus_phase = 'confirm'
                     st.rerun()
+
+        # Inline editors: Micro + Kategorie
+        if not done:
+            btn_cols = st.columns(2)
+            with btn_cols[0]:
+                micro_lbl = "⚡ Micro ändern" if micro_action else "⚡ Micro setzen"
+                if st.button(micro_lbl, key=f"{pfx}_mshow_{eid}", use_container_width=True):
+                    st.session_state[f"show_micro_{eid}"] = not st.session_state.get(f"show_micro_{eid}", False)
+                    st.rerun()
+            if show_category_controls:
+                with btn_cols[1]:
+                    cat_lbl = f"🏷️ {cat['icon']} {cat['name']}" if cat else "🏷️ Kategorie"
+                    if st.button(cat_lbl, key=f"{pfx}_cshow_{eid}", use_container_width=True):
+                        st.session_state[f"show_cat_{eid}"] = not st.session_state.get(f"show_cat_{eid}", False)
+                        st.rerun()
+
+            if st.session_state.get(f"show_micro_{eid}"):
+                new_micro = st.text_input(
+                    "⚡ Starten mit (2 min):", value=micro_action or "",
+                    placeholder="z.B. Dokument öffnen, Notiz anlegen...",
+                    key=f"{pfx}_micro_inp_{eid}"
+                )
+                sc, cc = st.columns(2)
+                with sc:
+                    if st.button("💾 Speichern", key=f"{pfx}_msave_{eid}", use_container_width=True):
+                        _set_micro(eid, new_micro.strip())
+                        st.session_state[f"show_micro_{eid}"] = False
+                        st.rerun()
+                with cc:
+                    if st.button("✕", key=f"{pfx}_mcancel_{eid}", use_container_width=True):
+                        st.session_state[f"show_micro_{eid}"] = False
+                        st.rerun()
+
+            if show_category_controls and st.session_state.get(f"show_cat_{eid}"):
+                cat_options = ["— keine —"] + [f"{c['icon']} {c['name']}" for c in categories]
+                cur_idx = 0
+                if cat:
+                    try:
+                        cur_idx = next(i+1 for i,c in enumerate(categories) if c['id'] == category_id)
+                    except StopIteration:
+                        pass
+                sel = st.selectbox("Kategorie wählen:", cat_options, index=cur_idx,
+                                   key=f"{pfx}_catsel_{eid}")
+                sc2, cc2 = st.columns(2)
+                with sc2:
+                    if st.button("💾 Speichern", key=f"{pfx}_csave_{eid}", use_container_width=True):
+                        if sel == "— keine —":
+                            set_entry_category(eid, None)
+                        else:
+                            chosen = next((c for c in categories
+                                           if f"{c['icon']} {c['name']}" == sel), None)
+                            if chosen:
+                                set_entry_category(eid, chosen['id'])
+                        st.session_state[f"show_cat_{eid}"] = False
+                        st.rerun()
+                with cc2:
+                    if st.button("✕", key=f"{pfx}_ccancel_{eid}", use_container_width=True):
+                        st.session_state[f"show_cat_{eid}"] = False
+                        st.rerun()
+
+    open_hl    = sum(1 for r in highlights if not r[9])
+    open_todos = sum(1 for r in brains if not r[9])
+
+    tab_hl, tab_todo = st.tabs([
+        f"⭐ Highlight ({open_hl} offen)",
+        f"📝 To-Do Liste ({open_todos} offen)"
+    ])
+
+    # ── TAB 1: DAILY HIGHLIGHT ───────────────────────────────────────
+    with tab_hl:
+        if highlights:
+            for r in highlights:
+                render_row(r, "fok-hl", "hl", show_category_controls=False)
+        else:
+            st.info("Noch kein Highlight — geh zu **Planen** und wähle deine wichtigste Aufgabe.")
+            if st.button("Zum Planen →", key="fok_to_plan"):
+                st.session_state.page = "Planen"
+                st.rerun()
+
+    # ── TAB 2: TO-DO LISTE ───────────────────────────────────────────
+    with tab_todo:
+        if st.button("➕ Aufgabe hinzufügen", key="fok_quick_toggle"):
+            st.session_state['fok_show_add'] = not st.session_state.get('fok_show_add', False)
+            st.rerun()
+
+        if st.session_state.get('fok_show_add'):
+            with st.form("fok_quick_add"):
+                qa1, qa2, qa3 = st.columns([3, 1, 1])
+                with qa1:
+                    new_task = st.text_input("Aufgabe", label_visibility="collapsed",
+                                              placeholder="Aufgabe eingeben...")
+                with qa2:
+                    cat_opts = ["— keine —"] + [f"{c['icon']} {c['name']}" for c in categories]
+                    qa_cat = st.selectbox("Kategorie", cat_opts, label_visibility="collapsed")
+                with qa3:
+                    qa_micro = st.text_input("⚡ Starter", label_visibility="collapsed",
+                                              placeholder="2-min Starter...")
+                if st.form_submit_button("✓ Hinzufügen", use_container_width=True):
+                    if new_task.strip():
+                        new_id = add_entry("brain", new_task.strip(),
+                                           estimate=predict_duration("brain"))
+                        if qa_cat != "— keine —":
+                            chosen_cat = next((c for c in categories
+                                               if f"{c['icon']} {c['name']}" == qa_cat), None)
+                            if chosen_cat and new_id:
+                                set_entry_category(new_id, chosen_cat['id'])
+                        if qa_micro.strip() and new_id:
+                            _set_micro(new_id, qa_micro.strip())
+                        st.session_state['fok_show_add'] = False
+                        st.rerun()
+
+        if brains:
+            used_cat_ids = {r[15] for r in brains if r[15]}
+            active_cats  = [c for c in categories if c['id'] in used_cat_ids]
+            if active_cats:
+                filter_opts = ["Alle"] + [f"{c['icon']} {c['name']}" for c in active_cats]
+                sel_filter = st.radio("", filter_opts, horizontal=True, key="todo_filter_radio")
+                if sel_filter != "Alle":
+                    cf = next((c for c in active_cats if f"{c['icon']} {c['name']}" == sel_filter), None)
+                    visible_brains = [r for r in brains if r[15] == (cf['id'] if cf else None)]
+                else:
+                    visible_brains = brains
+            else:
+                visible_brains = brains
+
+            open_tasks = [r for r in visible_brains if not r[9]]
+            done_tasks = [r for r in visible_brains if r[9]]
+
+            for r in open_tasks:
+                render_row(r, "fok-br", "br")
+
+            if done_tasks:
+                with st.expander(f"✅ Erledigt ({len(done_tasks)})"):
+                    for r in done_tasks:
+                        render_row(r, "fok-br fok-done", "brd")
+        else:
+            st.info("Noch keine Aufgaben — füge sie über Brain Dump in Planen oder ➕ hinzu.")
 
 
 def render_alle_eintraege_page():
@@ -965,19 +3084,22 @@ def render_alle_eintraege_page():
 
 
 def _render_entry_card(r):
-    eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at, deadline = r
+    eid, etype, content, tags, priority, estimate, points, created_at, entry_date, done, completed_at, elapsed_seconds, started_at, deadline, micro_action, category_id = r
     urg_level, urg_days, urg_label, urg_class = get_urgency(deadline)
 
     card_cls = (urg_class + " urg-done") if done else urg_class
     type_label = TYPE_LABELS.get(etype, etype)
     dl_badge = f'<span class="dl-badge">{urg_label}</span>' if urg_label else ""
     done_badge = '<span class="dl-badge" style="color:#4ade80">✅ Erledigt</span>' if done else ""
+    micro_html = (f'<br><span style="font-size:11px;color:#00ff88;opacity:.85">⚡ Starten mit: <em>{micro_action}</em></span>'
+                  if micro_action and not done else "")
 
     st.markdown(
         f'<div class="{card_cls}">'
         f'<span style="font-size:12px;opacity:.6;text-transform:uppercase;letter-spacing:.5px">'
         f'{entry_date} · {type_label}</span>{dl_badge}{done_badge}<br>'
         f'<strong style="font-size:16px">{content}</strong>'
+        + micro_html
         + (f'<br><small style="opacity:.55">🏷️ {tags}</small>' if tags else "")
         + (f'<br><small style="opacity:.55">⏱️ ~{estimate} min</small>' if estimate else "")
         + (f'<br><small style="opacity:.55">⭐ {points} Punkte</small>' if done and points else "")
@@ -1404,57 +3526,781 @@ def render_routinen_page():
     st.caption(f"Routinen werden täglich beim App-Start automatisch in den Tagesplan eingeplant.")
 
 
-def render_statistics_page():
-    st.title("📊 Deine Kaizen-Statistiken")
-    stats = get_analytics_stats()
+def _get_char_body(char_level, class_id, equipped_body):
+    if equipped_body == 'godly': return '🌟'
+    if equipped_body == 'shadow': return '🦇'
+    if equipped_body == 'crown': pass  # handled as overlay
+    ci = CLASS_INFO.get(class_id, {})
+    bodies = ci.get('bodies', {1: '🧍', 5: '⚔️', 15: '🥷', 25: '🦸', 50: '🌟', 100: '👑'})
+    body = '🧍'
+    for req_lvl in sorted(bodies.keys()):
+        if char_level >= req_lvl:
+            body = bodies[req_lvl]
+    return body
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("✅ Erledigt", stats['completed'])
-    col2.metric("📝 Total", stats['total'])
-    col3.metric("⏱️ Minuten", stats['total_minutes'])
-    rate = (stats['completed'] / stats['total'] * 100) if stats['total'] > 0 else 0
-    col4.metric("📈 Erfolgsquote", f"{rate:.1f}%")
+
+_CHAR_AURA_COLORS = {
+    'blue':'#00d4ff','green':'#00ff88','purple':'#9b59b6','dragon':'#e74c3c',
+    'rainbow':'#ff00ff','divine':'#ffd700',
+    'ocean_s1':'#006994','star_s1':'#ffd700','dawn_s1':'#ff7f50','cosmic_s1':'#8040ff',
+    'rift_s1':'#00ffcc','deep_s1':'#003d66','beyond_s1':'#7000ff',
+    'legend_s1':'#ffaa00','absolute_s1':'#ffffff',
+    'void_s2':'#4a0080','night_s2':'#191970','shadow_s2':'#444',
+    'ember_s3':'#ff6600','hellfire_s3':'#ff0000',
+}
+
+_SEASON_BODY_MAP = {
+    'crown':'👑','shadow':'🦇','godly':'🌟',
+    'rise':'🛡️','guardian':'🗡️','divine_s1':'🌟',
+    'ghost':'👻','shade_s2':'🌑',
+    'fire_s3':'🔥','demon_s3':'😈',
+}
+
+
+def _build_char_visual(char, level):
+    ci = CLASS_INFO.get(char.get('class_id', ''), {})
+    class_col = ci.get('color', '#00d4ff')
+    eq_aura = char.get('equipped_aura', '') or ''
+    glow_col = _CHAR_AURA_COLORS.get(eq_aura, class_col)
+    eq_body = char.get('equipped_body', '') or ''
+    if eq_body and eq_body not in ('crown',):
+        body = _SEASON_BODY_MAP.get(eq_body, _get_char_body(level, char.get('class_id', ''), ''))
+    else:
+        body = _get_char_body(level, char.get('class_id', ''), eq_body)
+    crown = '👑' if eq_body == 'crown' else ''
+
+    tier_label = ("NEULING" if level < 5 else "ABENTEURER" if level < 15 else
+                  "KRIEGER" if level < 30 else "HELD" if level < 50 else
+                  "CHAMPION" if level < 75 else "LEGENDE" if level < 100 else "GOTTHEIT")
+    tier_col = ("#888" if level < 5 else "#27ae60" if level < 15 else "#00d4ff" if level < 30
+                else "#ffd700" if level < 50 else "#ff9500" if level < 75
+                else "#ff00ff" if level < 100 else "#ffd700")
+    eq_title = char.get('equipped_title', '') or ''
+
+    # Returns full self-contained HTML for use with components.v1.html()
+    return f"""<!DOCTYPE html>
+<html><head><style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:transparent;font-family:-apple-system,BlinkMacSystemFont,sans-serif}}
+@keyframes float{{0%,100%{{transform:translateY(0)}}50%{{transform:translateY(-12px)}}}}
+@keyframes pulse{{0%,100%{{opacity:.5;transform:scale(.95)}}50%{{opacity:1;transform:scale(1.08)}}}}
+</style></head>
+<body>
+<div style="position:relative;text-align:center;padding:24px 14px 16px;
+  background:linear-gradient(160deg,rgba(255,255,255,0.07),rgba(255,255,255,0.02));
+  border-radius:18px;border:1px solid rgba(255,255,255,0.1);overflow:hidden;height:100%">
+  <div style="position:absolute;top:8px;left:8px;background:{tier_col}25;
+    border:1px solid {tier_col}55;border-radius:20px;padding:2px 8px;
+    font-size:9px;font-weight:900;color:{tier_col};letter-spacing:2px">{tier_label}</div>
+  <div style="position:absolute;top:8px;right:8px;background:rgba(0,0,0,0.5);
+    border:1px solid rgba(255,255,255,0.15);border-radius:20px;padding:2px 8px;
+    font-size:11px;font-weight:900;color:white">LVL {level}</div>
+  <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-55%);
+    width:120px;height:120px;border-radius:50%;
+    border:1px solid {glow_col}44;
+    animation:pulse 2.5s ease-in-out infinite;
+    background:radial-gradient(circle,{glow_col}18 0%,transparent 70%)"></div>
+  <div style="position:relative;display:inline-block;margin-top:18px">
+    {f'<div style="font-size:26px;margin-bottom:-8px">{crown}</div>' if crown else '<div style="height:16px"></div>'}
+    <div style="font-size:86px;line-height:1;animation:float 3s ease-in-out infinite;
+      filter:drop-shadow(0 0 16px {glow_col})">{body}</div>
+  </div>
+  <div style="font-weight:900;color:white;font-size:19px;margin-top:8px">{char.get('name','Hero')}</div>
+  {f'<div style="font-size:10px;color:{glow_col};letter-spacing:2px;font-weight:700;text-transform:uppercase;margin-top:2px">{eq_title}</div>' if eq_title else ''}
+  <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-top:3px">{ci.get('icon','⭐')} {ci.get('name','Held')}</div>
+</div>
+</body></html>"""
+
+
+def _render_char_setup():
+    st.markdown("## ⚔️ Erstelle deinen Charakter")
+    st.markdown("Wähle Klasse und Namen, um dein Produktivitäts-Abenteuer zu beginnen.")
+    st.markdown("")
+    with st.form("char_setup_form"):
+        name = st.text_input("Dein Heldenname", placeholder="z.B. Angelo")
+        st.markdown("#### Klasse wählen")
+        class_options = [
+            f"{v['icon']} {v['name']} — {v['bonus_desc']}" for v in CLASS_INFO.values()
+        ]
+        class_keys = list(CLASS_INFO.keys())
+        chosen_idx = st.radio("", class_options, index=0, label_visibility="collapsed")
+        idx = class_options.index(chosen_idx)
+        if st.form_submit_button("⚔️ Abenteuer beginnen!", use_container_width=True, type="primary"):
+            if name.strip():
+                save_character(name.strip(), class_keys[idx])
+                award_xp(100, entry_type=None)
+                st.success(f"🎊 Willkommen, {name.strip()}! Deine Reise beginnt!")
+                st.rerun()
+            else:
+                st.warning("Bitte gib einen Namen ein.")
+
+
+def _render_shop(current_level, coins):
+    st.caption(f"💰 Du hast **{coins} Münzen** · Items nach Level gesperrt bis du es erreichst")
+    st.write("")
+    all_items = get_all_shop_items()
+    owned_keys = {i['item_key'] for i in get_inventory()}
+    CAT_LABELS = {
+        'cosmetic_aura': '✨ Auras', 'cosmetic_body': '🎭 Outfits',
+        'title': '📜 Titel', 'consumable': '⚡ Verbrauchsgüter', 'upgrade': '🔮 Permanente Upgrades'
+    }
+    from collections import defaultdict
+    by_cat = defaultdict(list)
+    for it in all_items:
+        by_cat[it['category']].append(it)
+    for cat in ['cosmetic_aura', 'cosmetic_body', 'title', 'consumable', 'upgrade']:
+        items = by_cat.get(cat, [])
+        if not items:
+            continue
+        st.markdown(f"#### {CAT_LABELS.get(cat, cat)}")
+        cols = st.columns(3)
+        for i, it in enumerate(items):
+            with cols[i % 3]:
+                rc = RARITY_COLORS.get(it['rarity'], '#636e72')
+                locked = current_level < it['unlock_level']
+                already_owned = it['item_key'] in owned_keys and not it['stackable']
+                can_afford = coins >= it['cost_coins']
+                opacity = "0.45" if locked else "1"
+                st.markdown(f"""<div style="background:rgba(255,255,255,0.04);border-radius:12px;
+                  padding:14px;border-top:3px solid {rc};border:1px solid {rc}33;
+                  margin-bottom:6px;opacity:{opacity}">
+                  <div style="font-size:30px;text-align:center;margin-bottom:6px">{it['icon']}</div>
+                  <div style="font-weight:700;font-size:13px;text-align:center">{it['name']}</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.45);text-align:center;margin:4px 0 8px">{it['description']}</div>
+                  <div style="display:flex;justify-content:space-between">
+                    <span style="font-size:10px;color:{rc};font-weight:700;text-transform:uppercase">{RARITY_LABELS.get(it['rarity'],it['rarity'])}</span>
+                    <span style="color:#ffd700;font-weight:700;font-size:13px">🪙 {it['cost_coins']}</span>
+                  </div>
+                  {'<div style="font-size:10px;color:rgba(255,255,255,0.3);text-align:center;margin-top:6px">🔒 Entsperrt ab Level ' + str(it['unlock_level']) + '</div>' if locked else ''}
+                </div>""", unsafe_allow_html=True)
+                if already_owned:
+                    st.markdown('<div style="text-align:center;font-size:12px;color:#00ff88">✅ Besessen</div>',
+                                unsafe_allow_html=True)
+                elif locked:
+                    st.button(f"🔒 Ab Lvl {it['unlock_level']}", key=f"buy_{it['item_key']}",
+                               disabled=True, use_container_width=True)
+                elif not can_afford:
+                    st.button(f"💸 {it['cost_coins']} Münzen", key=f"buy_{it['item_key']}",
+                               disabled=True, use_container_width=True)
+                else:
+                    if st.button(f"Kaufen · 🪙 {it['cost_coins']}", key=f"buy_{it['item_key']}",
+                                  use_container_width=True, type="primary"):
+                        ok, msg = buy_item(it['item_key'])
+                        if ok:
+                            st.success(msg)
+                            st.rerun()
+                        else:
+                            st.error(msg)
+        st.markdown("")
+
+
+def _render_inventory():
+    inv = get_inventory()
+    if not inv:
+        st.info("Dein Inventar ist leer — geh in den Shop und kaufe dein erstes Item! 🛒")
+        return
+    for it in inv:
+        rc = RARITY_COLORS.get(it['rarity'], '#636e72')
+        is_eq = it['equipped']
+        uses = it['uses_remaining']
+        uses_txt = f"· {uses}× übrig" if uses > 0 else "· ∞ Verwendungen" if uses < 0 else "· verbraucht"
+        eq_badge = f' <span style="color:{rc};font-size:10px;font-weight:700">[AKTIV]</span>' if is_eq else ''
+        c1, c2, c3 = st.columns([0.4, 2.8, 1.5])
+        with c1:
+            st.markdown(f'<div style="font-size:34px;text-align:center;padding:4px 0">{it["icon"]}</div>',
+                        unsafe_allow_html=True)
+        with c2:
+            st.markdown(f'<strong style="color:white">{it["name"]}</strong>{eq_badge}',
+                        unsafe_allow_html=True)
+            st.caption(f'{RARITY_LABELS.get(it["rarity"], it["rarity"])} · {it["description"][:50]} {uses_txt}')
+        with c3:
+            if it['category'] in ('cosmetic_aura', 'cosmetic_body', 'title'):
+                lbl = "Ablegen" if is_eq else "Anlegen"
+                if st.button(lbl, key=f"eq_{it['id']}", use_container_width=True,
+                              type="primary" if not is_eq else "secondary"):
+                    equip_item(it['id'], it['item_key'], it['category'])
+                    st.rerun()
+            elif it['category'] == 'consumable' and uses != 0:
+                if st.button("Verwenden", key=f"use_{it['id']}", use_container_width=True):
+                    ok, msg = use_item(it['id'])
+                    if ok:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        st.markdown('<hr style="border-color:rgba(255,255,255,0.05);margin:4px 0">', unsafe_allow_html=True)
+
+
+def render_character_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+
+    char = get_character()
+    if not char or not char.get('class_id'):
+        _render_char_setup()
+        return
+
+    level, xp_cur, xp_next = compute_level(char['total_xp'])
+
+    # ── Level-up notification ──────────────────────────────────────
+    if st.session_state.get('levelup_queue'):
+        for notif in st.session_state.levelup_queue:
+            st.balloons()
+            st.success(f"🎊 LEVEL UP! Du bist jetzt **Level {notif['level']}**! +{notif['coins']} 🪙 Münzen verdient!")
+        del st.session_state['levelup_queue']
+
+    # ── Header: Charakter-Card + Stats ────────────────────────────
+    col_vis, col_stats = st.columns([1, 1.8])
+    ci = CLASS_INFO.get(char.get('class_id', ''), {})
+    pct = int(xp_cur / xp_next * 100) if xp_next > 0 else 0
+    xp_bar_col = ci.get('color', '#00d4ff')
+
+    with col_vis:
+        components.html(_build_char_visual(char, level), height=310)
+
+    with col_stats:
+        # Season pass progress
+        sp_data = get_player_season()
+        s_id = sp_data['season_id']
+        s_xp = sp_data['season_xp']
+        season = next((s for s in SEASON_PASS_DATA if s['id'] == s_id), SEASON_PASS_DATA[0])
+        claimed = get_season_claimed(s_id)
+        unclaimed_tiers = [t for t in season['tiers'] if s_xp >= t['xp'] and t['tier'] not in claimed]
+
+        active_boosts = []
+        xp_exp = get_setting('xp_boost_expiry', '')
+        if xp_exp:
+            try:
+                if datetime.fromisoformat(xp_exp) > datetime.utcnow():
+                    active_boosts.append("⚡ XP-Boost")
+            except Exception:
+                pass
+        if get_setting('streak_shield_active', ''):
+            active_boosts.append("🛡️ Streak-Schild")
+        boost_html = " ".join(f'<span style="background:#ffd70033;color:#ffd700;font-size:10px;padding:1px 7px;border-radius:10px;font-weight:700">{b}</span>' for b in active_boosts) if active_boosts else ''
+
+        stats_html = f"""<!DOCTYPE html><html><head><style>
+        *{{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif}}
+        body{{background:transparent;color:white;padding:8px 4px}}
+        </style></head><body>
+        <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:3px">KLASSE</div>
+        <div style="font-size:14px;font-weight:700;margin-bottom:14px">{ci.get('icon','⭐')} {ci.get('name','Held')} <span style="color:rgba(255,255,255,0.4);font-size:11px">— {ci.get('bonus_desc','')}</span></div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:2px">LEVEL</div>
+        <div style="font-size:46px;font-weight:900;color:{xp_bar_col};line-height:1;margin-bottom:10px">{level}</div>
+        <div style="background:rgba(255,255,255,0.12);border-radius:8px;height:11px;overflow:hidden;margin-bottom:5px">
+          <div style="width:{pct}%;height:100%;border-radius:8px;background:linear-gradient(90deg,{xp_bar_col},{xp_bar_col}99);box-shadow:0 0 8px {xp_bar_col}66"></div>
+        </div>
+        <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-bottom:2px">{xp_cur:,} / {xp_next:,} XP</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.3);margin-bottom:14px">Gesamt: {char['total_xp']:,} XP</div>
+        <div style="font-size:22px;font-weight:900;color:#ffd700;margin-bottom:10px">💰 {char['coins']} Münzen</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:2px;text-transform:uppercase;margin-bottom:4px">SEASON PASS</div>
+        <div style="font-size:12px;font-weight:700;color:{season['color']};margin-bottom:6px">{season['icon']} {season['name']}</div>
+        <div style="background:rgba(255,255,255,0.1);border-radius:6px;height:8px;overflow:hidden;margin-bottom:4px">
+          <div style="width:{min(100,int(s_xp / max(1,season['tiers'][-1]['xp'])*100))}%;height:100%;background:linear-gradient(90deg,{season['color']},{season['color']}99)"></div>
+        </div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.35);margin-bottom:6px">Season XP: {s_xp:,} · {"🎁 " + str(len(unclaimed_tiers)) + " Belohnungen verfügbar!" if unclaimed_tiers else "Auf dem aktuellen Stand"}</div>
+        {boost_html}
+        </body></html>"""
+        components.html(stats_html, height=310)
 
     st.markdown("---")
-    col1, col2 = st.columns(2)
-    with col1:
+
+    # ── Tabs ────────────────────────────────────────────────────────
+    tab_shop, tab_inv, tab_hist = st.tabs(["🛒 Shop", "🎒 Inventar", "📜 Level-Geschichte"])
+
+    with tab_shop:
+        _render_shop(level, char['coins'])
+
+    with tab_inv:
+        _render_inventory()
+
+    with tab_hist:
+        hist = get_level_history()
+        if not hist:
+            st.info("Noch kein Level-Up — erledige Quests und sammle XP!")
+        else:
+            for lvl, coins_e, ts in hist:
+                ts_short = ts[:10] if ts else "?"
+                tier_c = "#ff00ff" if lvl >= 100 else "#ffd700" if lvl >= 50 else "#00d4ff" if lvl >= 25 else "#27ae60" if lvl >= 10 else "#636e72"
+                st.markdown(f"""<div style="display:flex;align-items:center;gap:12px;padding:8px 14px;
+                  background:rgba(255,255,255,0.03);border-radius:10px;margin-bottom:6px;
+                  border-left:3px solid {tier_c}">
+                  <div style="font-size:24px;font-weight:900;color:{tier_c};min-width:60px">LVL {lvl}</div>
+                  <div style="flex:1;font-size:13px;color:rgba(255,255,255,0.6)">{ts_short}</div>
+                  <div style="color:#ffd700;font-weight:700">+{coins_e} 🪙</div>
+                </div>""", unsafe_allow_html=True)
+
+
+def render_habit_tracker_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+    st.title("🔁 Habit Tracker")
+    st.caption("Adaptiv — 50% Kraft + 50% Effort = 100% für heute")
+
+    today = date.today().isoformat()
+
+    # ── Energy Calibration ─────────────────────────────────────────
+    st.markdown("#### 🔋 Heutige Energie")
+    energy = st.slider("", 10, 100, value=get_today_energy(), step=10,
+                        key="energy_dial", label_visibility="collapsed")
+    set_today_energy(energy)
+
+    _elabels = {10:"😴 Kaum da",20:"🥱 Sehr müde",30:"😞 Wenig Kraft",40:"😐 Unter Normal",
+                50:"🙂 Halbe Kraft",60:"😊 Okay",70:"💪 Gut drauf",80:"🔥 Stark",
+                90:"⚡ Sehr stark",100:"🚀 Vollgas"}
+    elabel = _elabels.get(energy, f"{energy}%")
+    bcol = ("#ff4444" if energy < 30 else "#ffd700" if energy < 50 else
+            "#00d4ff" if energy < 80 else "#00ff88")
+
+    st.markdown(f"""<div style="background:rgba(255,255,255,0.04);border-radius:10px;
+        padding:10px 16px;border:1px solid rgba(255,255,255,0.08);margin:-10px 0 22px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div style="flex:1;background:rgba(255,255,255,0.1);border-radius:6px;height:10px;overflow:hidden">
+          <div style="width:{energy}%;height:100%;border-radius:6px;
+            background:linear-gradient(90deg,{bcol},{bcol}bb);
+            box-shadow:0 0 10px {bcol}66"></div>
+        </div>
+        <span style="font-weight:900;color:white;font-size:20px;min-width:48px">{energy}%</span>
+        <span style="color:rgba(255,255,255,0.5);font-size:14px">{elabel}</span>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Today's Habits ─────────────────────────────────────────────
+    habits = get_habits()
+
+    if habits:
+        st.markdown("#### Heute")
+        per_row = 4
+        for row_start in range(0, len(habits), per_row):
+            row_habits = habits[row_start:row_start + per_row]
+            cols = st.columns(per_row)
+            for col, habit in zip(cols, row_habits):
+                with col:
+                    log = get_habit_log(habit['id'], today)
+                    comp = log['completion_pct'] if log else 0
+                    score = adaptive_score(comp, energy)
+                    st.markdown(_habit_ring_html(habit, score, comp), unsafe_allow_html=True)
+                    new_comp = st.slider("", 0, 100, value=comp, step=10,
+                                          key=f"hcomp_{habit['id']}",
+                                          label_visibility="collapsed", format="%d%%")
+                    if new_comp != comp:
+                        log_habit(habit['id'], today, energy, new_comp)
+                        st.rerun()
+                    if st.button("×", key=f"hdel_{habit['id']}",
+                                  help="Habit entfernen", use_container_width=True):
+                        delete_habit(habit['id'])
+                        st.rerun()
+    else:
+        st.info("Noch keine Habits — füge deinen ersten hinzu! 👇")
+
+    # ── Add Habit ──────────────────────────────────────────────────
+    with st.expander("➕ Neuen Habit hinzufügen"):
+        with st.form("new_habit_form"):
+            hc1, hc2, hc3 = st.columns([3, 1, 2])
+            with hc1:
+                h_name = st.text_input("Name", placeholder="z.B. 2L Wasser trinken")
+            with hc2:
+                h_icon = st.selectbox("Icon", HABIT_ICONS, key="hi_icon")
+            with hc3:
+                h_cat = st.selectbox("Kategorie", [
+                    "Gesundheit","Fitness","Mental","Ernährung","Lernen","Schlaf","Sonstiges"
+                ])
+            h_color = st.color_picker("Farbe", value="#00d4ff")
+            if st.form_submit_button("Habit erstellen", use_container_width=True, type="primary"):
+                if h_name.strip():
+                    add_habit(h_name.strip(), h_cat, h_icon, h_color)
+                    st.success(f"✅ '{h_name}' erstellt!")
+                    st.rerun()
+
+    # ── Analytics ─────────────────────────────────────────────────
+    if habits:
+        st.markdown("---")
+        st.markdown("### 📊 Analytics")
+        tab1, tab2, tab3, tab4 = st.tabs(["🗓️ Heatmap", "🔥 Streaks", "🕸️ Wochenradar", "📈 Momentum"])
+
+        with tab1:
+            st.markdown("<small>Adaptive Performance der letzten 12 Wochen. "
+                        "Farbe = normalisierte Leistung bei der jeweiligen Tagesenergie.</small>",
+                        unsafe_allow_html=True)
+            st.write("")
+            for h in habits:
+                st.markdown(_habit_heatmap_html(h), unsafe_allow_html=True)
+
+        with tab2:
+            st.markdown("<small>Konsekutive Tage mit adaptivem Score ≥ 80%</small>",
+                        unsafe_allow_html=True)
+            st.write("")
+            _render_habit_streaks(habits)
+
+        with tab3:
+            _render_habit_radar(habits)
+
+        with tab4:
+            _render_habit_momentum(habits)
+
+
+def render_settings_page():
+    st.title("⚙️ Einstellungen")
+
+    # ── Kategorien ─────────────────────────────────────────────────
+    st.markdown("### 🏷️ Aufgaben-Kategorien")
+    st.caption("Erstelle eigene Kategorien mit Icon, Farbe und XP-Wert. Der XP-Wert bestimmt, wie viel XP eine erledigte Aufgabe in dieser Kategorie bringt.")
+
+    categories = get_categories()
+
+    # Edit / delete existing
+    for cat in categories:
+        with st.expander(f"{cat['icon']} **{cat['name']}** — {cat['base_xp']} XP", expanded=False):
+            with st.form(f"cat_edit_{cat['id']}"):
+                ec1, ec2 = st.columns([2, 1])
+                with ec1:
+                    new_name  = st.text_input("Name", value=cat['name'], key=f"ce_name_{cat['id']}")
+                    new_icon  = st.text_input("Icon (Emoji)", value=cat['icon'], key=f"ce_icon_{cat['id']}")
+                with ec2:
+                    new_color = st.color_picker("Farbe", value=cat['color'], key=f"ce_color_{cat['id']}")
+                    new_xp    = st.number_input("Basis-XP", value=int(cat['base_xp']), min_value=10,
+                                                max_value=1000, step=10, key=f"ce_xp_{cat['id']}")
+                col_save, col_del = st.columns(2)
+                with col_save:
+                    if st.form_submit_button("💾 Speichern", use_container_width=True):
+                        conn = sqlite3.connect(DB_PATH)
+                        conn.execute("UPDATE task_categories SET name=?,icon=?,color=?,base_xp=? WHERE id=?",
+                                     (new_name.strip(), new_icon.strip(), new_color, new_xp, cat['id']))
+                        conn.commit()
+                        conn.close()
+                        st.success("Gespeichert!")
+                        st.rerun()
+                with col_del:
+                    if st.form_submit_button("🗑️ Löschen", use_container_width=True):
+                        conn = sqlite3.connect(DB_PATH)
+                        conn.execute("UPDATE entries SET category_id=NULL WHERE category_id=?", (cat['id'],))
+                        conn.execute("DELETE FROM task_categories WHERE id=?", (cat['id'],))
+                        conn.commit()
+                        conn.close()
+                        st.rerun()
+
+    st.markdown("---")
+    st.markdown("##### ➕ Neue Kategorie")
+    with st.form("cat_add_form"):
+        nc1, nc2 = st.columns([2, 1])
+        with nc1:
+            add_name  = st.text_input("Name", placeholder="z.B. Kreativarbeit")
+            add_icon  = st.text_input("Icon", value="📌", placeholder="Emoji")
+        with nc2:
+            add_color = st.color_picker("Farbe", value="#636e72")
+            add_xp    = st.number_input("Basis-XP", value=100, min_value=10, max_value=1000, step=10)
+        if st.form_submit_button("Kategorie erstellen", use_container_width=True):
+            if add_name.strip():
+                conn = sqlite3.connect(DB_PATH)
+                conn.execute(
+                    "INSERT INTO task_categories (name,icon,color,base_xp,sort_order) VALUES (?,?,?,?,?)",
+                    (add_name.strip(), add_icon.strip() or "📌", add_color, add_xp,
+                     len(categories))
+                )
+                conn.commit()
+                conn.close()
+                st.success(f"Kategorie '{add_name}' erstellt!")
+                st.rerun()
+
+
+def render_season_pass_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+
+    sp = get_player_season()
+    season_id = sp['season_id']
+    season_xp = sp['season_xp']
+    season = next((s for s in SEASON_PASS_DATA if s['id'] == season_id), SEASON_PASS_DATA[0])
+    claimed = get_season_claimed(season_id)
+    tiers = season['tiers']
+    max_xp = tiers[-1]['xp']
+    pct = min(100, int(season_xp / max_xp * 100)) if max_xp > 0 else 0
+
+    # Season header
+    season_col = season['color']
+    unclaimed = [t for t in tiers if season_xp >= t['xp'] and t['tier'] not in claimed]
+
+    header_html = f"""<!DOCTYPE html><html><head><style>
+    *{{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif}}
+    body{{background:transparent;padding:4px 0}}
+    @keyframes glow{{0%,100%{{box-shadow:0 0 20px {season_col}44}}50%{{box-shadow:0 0 40px {season_col}88}}}}
+    </style></head><body>
+    <div style="background:linear-gradient(135deg,{season_col}22,{season_col}08);
+      border:1px solid {season_col}44;border-radius:16px;padding:20px 24px;animation:glow 3s ease-in-out infinite">
+      <div style="display:flex;align-items:center;gap:16px;margin-bottom:14px">
+        <div style="font-size:48px">{season['icon']}</div>
+        <div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:3px;text-transform:uppercase">SEASON {season_id}</div>
+          <div style="font-size:26px;font-weight:900;color:white">{season['name']}</div>
+          <div style="font-size:12px;color:{season_col};font-weight:600">Season XP: {season_xp:,} / {max_xp:,}</div>
+        </div>
+        {'<div style="margin-left:auto;background:#ffd70033;border:1px solid #ffd70055;border-radius:12px;padding:8px 16px;text-align:center"><div style="font-size:22px">🎁</div><div style="font-size:11px;color:#ffd700;font-weight:700">' + str(len(unclaimed)) + ' verfügbar</div></div>' if unclaimed else ''}
+      </div>
+      <div style="background:rgba(0,0,0,0.3);border-radius:10px;height:14px;overflow:hidden;margin-bottom:6px">
+        <div style="width:{pct}%;height:100%;border-radius:10px;
+          background:linear-gradient(90deg,{season_col},{season_col}bb);
+          box-shadow:0 0 12px {season_col}88;transition:width 1s ease"></div>
+      </div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4)">
+        Tier {len(claimed)} / {len(tiers)} abgeschlossen · {pct}% der Season abgeschlossen
+      </div>
+    </div>
+    </body></html>"""
+    components.html(header_html, height=160)
+
+    if unclaimed:
+        st.markdown(f"### 🎁 Belohnungen einlösen ({len(unclaimed)})")
+        cols_claim = st.columns(min(4, len(unclaimed)))
+        for idx, tier in enumerate(unclaimed[:4]):
+            rarity_col = RARITY_COLORS.get(
+                next((i[6] for i in SEASON_EXCLUSIVE_ITEMS if i[0] == tier['value']), 'common'), '#636e72'
+            ) if tier['type'] == 'item' else ('#ffd700' if tier['type'] == 'title' else '#27ae60')
+            with cols_claim[idx % len(cols_claim)]:
+                st.markdown(f"""<div style="background:{rarity_col}18;border:1px solid {rarity_col}44;
+                  border-radius:12px;padding:12px;text-align:center;margin-bottom:6px">
+                  <div style="font-size:28px">{tier['icon']}</div>
+                  <div style="font-size:11px;font-weight:700;color:white;margin:4px 0 2px">{tier['name']}</div>
+                  <div style="font-size:9px;color:rgba(255,255,255,0.4)">Tier {tier['tier']}</div>
+                </div>""", unsafe_allow_html=True)
+                if st.button(f"Einlösen", key=f"claim_{season_id}_{tier['tier']}"):
+                    ok, msg = claim_season_reward(season_id, tier['tier'])
+                    if ok:
+                        st.success(msg)
+                        advance_season_if_complete()
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        if len(unclaimed) > 4:
+            if st.button(f"Alle {len(unclaimed)} Belohnungen auf einmal einlösen"):
+                msgs = []
+                for tier in unclaimed:
+                    ok, msg = claim_season_reward(season_id, tier['tier'])
+                    if ok:
+                        msgs.append(msg)
+                advance_season_if_complete()
+                st.success(f"✅ {len(msgs)} Belohnungen erhalten!")
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("### Alle Tiers")
+
+    # Render tier grid using components.html for guaranteed visual fidelity
+    def _render_tier_grid(tiers, season_xp, claimed, season_col):
+        cells = []
+        for t in tiers:
+            unlocked = season_xp >= t['xp']
+            is_claimed = t['tier'] in claimed
+            is_current = not is_claimed and unlocked
+
+            if is_claimed:
+                bg = '#27ae6022'; border = '#27ae6055'; icon_display = f'<div style="font-size:20px">{t["icon"]}</div><div style="font-size:14px;color:#27ae60">✓</div>'
+                opacity = '1'
+            elif is_current:
+                bg = f'{season_col}30'; border = f'{season_col}88'; icon_display = f'<div style="font-size:22px">{t["icon"]}</div>'
+                opacity = '1'
+            else:
+                bg = 'rgba(255,255,255,0.04)'; border = 'rgba(255,255,255,0.08)'; icon_display = f'<div style="font-size:22px;filter:grayscale(1);opacity:0.3">{t["icon"]}</div>'
+                opacity = '0.6'
+
+            glow = f'box-shadow:0 0 12px {season_col}66;' if is_current else ''
+            cells.append(f"""
+            <div title="Tier {t['tier']}: {t['name']} ({t['xp']:,} XP)" style="
+              background:{bg};border:1px solid {border};border-radius:10px;
+              padding:8px 4px;text-align:center;{glow}opacity:{opacity};
+              display:flex;flex-direction:column;align-items:center;justify-content:center;
+              min-height:62px">
+              {icon_display}
+              <div style="font-size:9px;color:rgba(255,255,255,0.4);margin-top:3px">T{t['tier']}</div>
+            </div>""")
+
+        rows_html = ""
+        for row_start in range(0, len(cells), 10):
+            row_cells = cells[row_start:row_start+10]
+            rows_html += f'<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px;margin-bottom:8px">{"".join(row_cells)}</div>'
+
+        return f"""<!DOCTYPE html><html><head><style>
+        *{{margin:0;padding:0;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,sans-serif}}
+        body{{background:transparent;padding:4px 0}}
+        </style></head><body>{rows_html}</body></html>"""
+
+    tier_html = _render_tier_grid(tiers, season_xp, claimed, season_col)
+    components.html(tier_html, height=390)
+
+    # Tier detail on click (show next 3 upcoming rewards)
+    st.markdown("##### Nächste Belohnungen")
+    upcoming = [t for t in tiers if t['tier'] not in claimed][:5]
+    if upcoming:
+        cols_up = st.columns(len(upcoming))
+        for idx, t in enumerate(upcoming):
+            unlocked = season_xp >= t['xp']
+            rarity_col = ('#ffd700' if t['type'] == 'title' else '#27ae60' if t['type'] == 'coins'
+                          else RARITY_COLORS.get(next((i[6] for i in SEASON_EXCLUSIVE_ITEMS if i[0] == t['value']), 'common'), '#636e72'))
+            status_text = "🔓 Bereit!" if unlocked else f"🔒 {t['xp']:,} XP"
+            with cols_up[idx]:
+                st.markdown(f"""<div style="background:{rarity_col}14;border:1px solid {rarity_col}33;
+                  border-radius:10px;padding:10px 8px;text-align:center">
+                  <div style="font-size:24px">{t['icon']}</div>
+                  <div style="font-size:11px;font-weight:700;color:white;margin:4px 0 2px">{t['name']}</div>
+                  <div style="font-size:9px;color:rgba(255,255,255,0.4);margin-bottom:4px">Tier {t['tier']}</div>
+                  <div style="font-size:10px;color:{rarity_col};font-weight:600">{status_text}</div>
+                </div>""", unsafe_allow_html=True)
+    else:
+        st.success("🏆 Alle Tiers dieser Season abgeschlossen! Nächste Season freigeschaltet!")
+
+    # Season overview at bottom
+    with st.expander("Andere Seasons anzeigen"):
+        for s in SEASON_PASS_DATA:
+            is_current = s['id'] == season_id
+            is_done = s['id'] < season_id
+            status = "✅ Abgeschlossen" if is_done else ("▶️ Aktiv" if is_current else "🔒 Gesperrt")
+            st.markdown(f"**{s['icon']} Season {s['id']}: {s['name']}** — {status}")
+
+
+def render_statistics_page():
+    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
+    st.title("📊 Statistiken")
+
+    stats = get_analytics_stats()
+    records = get_personal_records()
+    rate = (stats['completed'] / stats['total'] * 100) if stats['total'] > 0 else 0
+
+    # ── KPI Cards ─────────────────────────────────────────────────
+    kpi = "text-align:center;background:rgba(255,255,255,0.05);border-radius:12px;padding:16px 8px;border:1px solid rgba(255,255,255,0.09)"
+    k1, k2, k3, k4, k5 = st.columns(5)
+    k1.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#00d4ff">{stats["completed"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">✅ Erledigt</div></div>', unsafe_allow_html=True)
+    k2.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:white">{stats["total"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📝 Gesamt</div></div>', unsafe_allow_html=True)
+    k3.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#ffd700">{rate:.1f}%</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📈 Erfolgsquote</div></div>', unsafe_allow_html=True)
+    k4.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#ff9500">{records["total_hours"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">⏱️ Fokus-Stunden</div></div>', unsafe_allow_html=True)
+    k5.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#00ff88">{records["active_days_30"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📅 Aktive Tage (30d)</div></div>', unsafe_allow_html=True)
+
+    st.write("")
+
+    # ── Charts Row 1: Typ-Verteilung + Wochentag ──────────────────
+    col_l, col_r = st.columns(2)
+
+    with col_l:
         st.subheader("Aufgaben nach Typ")
         if stats['type_stats']:
-            df = pd.DataFrame(stats['type_stats'], columns=['Type', 'Count', 'Avg_Sec', 'Total_Sec'])
-            fig = px.pie(df, values='Count', names='Type',
-                         color_discrete_sequence=['#00d4ff', '#ff6b6b', '#ffd93d'])
-            st.plotly_chart(fig, use_container_width=True)
+            df_t = pd.DataFrame(stats['type_stats'], columns=['Type','Count','Avg_Sec','Total_Sec'])
+            df_t['Avg_Min'] = (df_t['Avg_Sec'] / 60).round(1)
+            fig_pie = px.pie(df_t, values='Count', names='Type',
+                             color_discrete_sequence=['#00d4ff','#ff6b6b','#ffd93d'],
+                             hole=0.45)
+            fig_pie.update_traces(textfont_size=13, textinfo='label+percent')
+            fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', showlegend=True,
+                                   font=dict(color='white'), margin=dict(t=10,b=10))
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
-            st.info("Keine Daten")
-    with col2:
-        st.subheader("Ø Dauer pro Typ (Min)")
+            st.info("Noch keine erledigten Aufgaben")
+
+    with col_r:
+        st.subheader("Produktivster Wochentag")
+        wd_stats = get_weekday_stats()
+        if wd_stats:
+            wd_map = {0:"So",1:"Mo",2:"Di",3:"Mi",4:"Do",5:"Fr",6:"Sa"}
+            wd_df = pd.DataFrame(wd_stats, columns=['wd','tasks','secs'])
+            wd_df['day'] = wd_df['wd'].map(wd_map)
+            wd_df['Minuten'] = (wd_df['secs'] / 60).round(1)
+            # Sort Mon-Sun
+            order = ["Mo","Di","Mi","Do","Fr","Sa","So"]
+            wd_df['day'] = pd.Categorical(wd_df['day'], categories=order, ordered=True)
+            wd_df = wd_df.sort_values('day')
+            fig_wd = go.Figure(go.Bar(
+                x=wd_df['day'], y=wd_df['tasks'],
+                marker=dict(
+                    color=wd_df['tasks'],
+                    colorscale=[[0,'rgba(0,212,255,0.3)'],[1,'#00d4ff']],
+                    showscale=False
+                ),
+                text=wd_df['tasks'], textposition='outside',
+                hovertemplate='%{x}: %{y} Aufgaben<extra></extra>'
+            ))
+            fig_wd.update_layout(
+                template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(5,8,15,0.4)',
+                yaxis=dict(gridcolor='rgba(255,255,255,0.06)', title='Aufgaben'),
+                xaxis=dict(gridcolor='rgba(255,255,255,0.06)'),
+                margin=dict(t=10, b=30, l=40, r=10), height=280
+            )
+            st.plotly_chart(fig_wd, use_container_width=True)
+        else:
+            st.info("Noch keine Daten")
+
+    st.markdown("---")
+
+    # ── Täglicher Trend ────────────────────────────────────────────
+    st.subheader("Täglicher Fortschritt (30 Tage)")
+    if stats['daily_trend']:
+        df_d = pd.DataFrame(stats['daily_trend'], columns=['Date','Count','Total_Sec'])
+        df_d['Minuten'] = (df_d['Total_Sec'] / 60).round(1)
+        fig_trend = go.Figure()
+        fig_trend.add_trace(go.Scatter(
+            x=df_d['Date'], y=df_d['Count'], mode='lines+markers', name='Aufgaben',
+            line=dict(color='#00d4ff', width=3),
+            fill='tozeroy', fillcolor='rgba(0,212,255,0.08)'
+        ))
+        fig_trend.add_trace(go.Scatter(
+            x=df_d['Date'], y=df_d['Minuten'], mode='lines+markers', name='Minuten',
+            line=dict(color='#ff6b6b', width=2, dash='dot'),
+            yaxis='y2'
+        ))
+        fig_trend.update_layout(
+            hovermode='x unified', template='plotly_dark',
+            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,8,15,0.4)',
+            yaxis=dict(title='Aufgaben', gridcolor='rgba(255,255,255,0.06)'),
+            yaxis2=dict(title='Minuten', overlaying='y', side='right',
+                        gridcolor='rgba(255,255,255,0.04)'),
+            margin=dict(t=10, b=40, l=50, r=60), height=300,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0)
+        )
+        st.plotly_chart(fig_trend, use_container_width=True)
+    else:
+        st.info("Noch keine Daten für den Trend")
+
+    st.markdown("---")
+
+    # ── Ø Dauer pro Typ ────────────────────────────────────────────
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.subheader("Ø Fokus-Zeit pro Typ")
         if stats['type_stats']:
-            df = pd.DataFrame(stats['type_stats'], columns=['Type', 'Count', 'Avg_Sec', 'Total_Sec'])
-            df['Avg_Min'] = df['Avg_Sec'] / 60
-            fig = px.bar(df, x='Type', y='Avg_Min', color='Type',
-                         color_discrete_sequence=['#00d4ff', '#ff6b6b', '#ffd93d'])
-            st.plotly_chart(fig, use_container_width=True)
+            df_t2 = pd.DataFrame(stats['type_stats'], columns=['Type','Count','Avg_Sec','Total_Sec'])
+            df_t2['Avg_Min'] = (df_t2['Avg_Sec'] / 60).round(1)
+            fig_bar = px.bar(df_t2, x='Type', y='Avg_Min', color='Type', text='Avg_Min',
+                              color_discrete_sequence=['#00d4ff','#ff6b6b','#ffd93d'])
+            fig_bar.update_traces(texttemplate='%{text} Min', textposition='outside')
+            fig_bar.update_layout(
+                template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(5,8,15,0.4)', showlegend=False,
+                yaxis=dict(title='Minuten', gridcolor='rgba(255,255,255,0.06)'),
+                margin=dict(t=10, b=30, l=50, r=10), height=280
+            )
+            st.plotly_chart(fig_bar, use_container_width=True)
         else:
             st.info("Keine Daten")
 
-    st.markdown("---")
-    st.subheader("Täglicher Fortschritt (30 Tage)")
-    if stats['daily_trend']:
-        df = pd.DataFrame(stats['daily_trend'], columns=['Date', 'Count', 'Total_Sec'])
-        df['Minutes'] = df['Total_Sec'] / 60
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Count'], mode='lines+markers',
-                                  name='Aufgaben', line=dict(color='#00d4ff', width=3)))
-        fig.add_trace(go.Scatter(x=df['Date'], y=df['Minutes'], mode='lines+markers',
-                                  name='Minuten', line=dict(color='#ff6b6b', width=3),
-                                  yaxis='y2'))
-        fig.update_layout(hovermode='x unified',
-                           yaxis=dict(title='Aufgaben'),
-                           yaxis2=dict(title='Minuten', overlaying='y', side='right'),
-                           template='plotly_dark')
-        st.plotly_chart(fig, use_container_width=True)
-    else:
-        st.info("Noch keine Daten")
+    # ── Personal Records ──────────────────────────────────────────
+    with col_b:
+        st.subheader("🏆 Persönliche Rekorde")
+        rec_style = ("background:rgba(255,255,255,0.04);border-radius:10px;"
+                     "padding:10px 14px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.08)")
+        if records['best_day']:
+            st.markdown(f'<div style="{rec_style}">🥇 <strong>Bester Tag:</strong> '
+                        f'{records["best_day"][0]} — {records["best_day"][1]} Aufgaben</div>',
+                        unsafe_allow_html=True)
+        if records['best_time_day']:
+            mins = round(records['best_time_day'][1] / 60)
+            st.markdown(f'<div style="{rec_style}">⏱️ <strong>Meiste Fokuszeit:</strong> '
+                        f'{records["best_time_day"][0]} — {mins} Min</div>',
+                        unsafe_allow_html=True)
+        if records['longest']:
+            lmins = round(records['longest'][1] / 60)
+            name = records['longest'][0][:40] + "…" if len(records['longest'][0]) > 40 else records['longest'][0]
+            st.markdown(f'<div style="{rec_style}">🔥 <strong>Längste Session:</strong> '
+                        f'{lmins} Min<br><small style="color:rgba(255,255,255,0.4)">{name}</small></div>',
+                        unsafe_allow_html=True)
+        total_h = records['total_hours']
+        st.markdown(f'<div style="{rec_style}">🎯 <strong>Fokus-Zeit gesamt:</strong> '
+                    f'{total_h} Stunden</div>', unsafe_allow_html=True)
 
 
 # ========== MAIN ==========
@@ -1472,7 +4318,7 @@ def main():
     if 'selected_project' not in st.session_state:
         st.session_state.selected_project = None
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Projekte", "Alle Einträge", "Routinen", "Statistiken"]
+    PAGES = ["Start", "Planen", "Tagesfokus", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -1480,6 +4326,15 @@ def main():
     page = st.sidebar.selectbox("Seite wählen", PAGES,
                                   index=PAGES.index(st.session_state.page))
     st.session_state.page = page
+
+    # Fokus-Modus übernimmt die gesamte Hauptfläche
+    if st.session_state.get('focus_task_id') and st.session_state.get('focus_phase'):
+        _render_focus_mode()
+        # Sidebar trotzdem rendern (Punkte etc.)
+        level, progress, goal = get_level_and_progress()
+        st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
+        st.sidebar.progress(int(progress / goal * 100))
+        return
 
     if page == "Start":
         render_start_page()
@@ -1493,12 +4348,45 @@ def main():
         render_alle_eintraege_page()
     elif page == "Routinen":
         render_routinen_page()
+    elif page == "Habits":
+        render_habit_tracker_page()
+    elif page == "Charakter":
+        render_character_page()
+    elif page == "Season Pass":
+        render_season_pass_page()
+    elif page == "KI Coach":
+        render_ki_coach_page()
     elif page == "Statistiken":
         render_statistics_page()
+    elif page == "Einstellungen":
+        render_settings_page()
 
-    level, progress, goal = get_level_and_progress()
-    st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
-    st.sidebar.progress(int(progress / goal * 100))
+    # Mini-Charakter in Sidebar
+    rpg_char = get_character()
+    if rpg_char and rpg_char.get('class_id'):
+        c_level, c_xp, c_xp_next = compute_level(rpg_char['total_xp'])
+        c_pct = int(c_xp / c_xp_next * 100) if c_xp_next > 0 else 0
+        c_ci = CLASS_INFO.get(rpg_char.get('class_id', ''), {})
+        c_col = c_ci.get('color', '#00d4ff')
+        c_body = _get_char_body(c_level, rpg_char.get('class_id', ''), rpg_char.get('equipped_body', ''))
+        st.sidebar.markdown(f"""<div style="background:rgba(255,255,255,0.05);border-radius:12px;
+          padding:10px 12px;margin-bottom:12px;border:1px solid rgba(255,255,255,0.1)">
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="font-size:34px;filter:drop-shadow(0 0 8px {c_col})">{c_body}</div>
+            <div style="flex:1;min-width:0">
+              <div style="font-weight:700;color:white;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{rpg_char['name']}</div>
+              <div style="font-size:11px;color:{c_col};font-weight:600">Level {c_level} · 💰 {rpg_char['coins']}</div>
+              <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:5px;margin-top:5px;overflow:hidden">
+                <div style="width:{c_pct}%;height:100%;border-radius:4px;background:{c_col};box-shadow:0 0 6px {c_col}88"></div>
+              </div>
+              <div style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:2px">{c_xp}/{c_xp_next} XP</div>
+            </div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        level, progress, goal = get_level_and_progress()
+        st.sidebar.header(f"Score: {total_points()} pts — Level {level}")
+        st.sidebar.progress(int(progress / goal * 100))
 
     st.sidebar.header("Quick Actions")
     with st.sidebar.expander("Punkte & Level"):
