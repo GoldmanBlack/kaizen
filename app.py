@@ -323,6 +323,11 @@ def init_db():
             c.execute("ALTER TABLE project_tasks ADD COLUMN notes TEXT DEFAULT ''")
         except Exception:
             pass
+    if 'highlight_color' not in pt_cols:
+        try:
+            c.execute("ALTER TABLE project_tasks ADD COLUMN highlight_color TEXT DEFAULT ''")
+        except Exception:
+            pass
     c.execute('''
     CREATE TABLE IF NOT EXISTS task_categories (
         id   INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -376,7 +381,8 @@ def init_db():
         scheduled_date TEXT,
         order_index INTEGER DEFAULT 0,
         created_at TEXT,
-        notes TEXT DEFAULT ''
+        notes TEXT DEFAULT '',
+        highlight_color TEXT DEFAULT ''
     )
     ''')
     c.execute('''
@@ -1403,7 +1409,7 @@ def get_project_tasks(project_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('''SELECT id, project_id, content, estimate_minutes, priority, done,
-                        completed_at, scheduled_date, order_index, COALESCE(notes,'')
+                        completed_at, scheduled_date, order_index, COALESCE(notes,''), COALESCE(highlight_color,'')
                  FROM project_tasks WHERE project_id=? ORDER BY order_index, id''', (project_id,))
     rows = c.fetchall()
     conn.close()
@@ -1480,6 +1486,17 @@ def move_project_task(task_id, direction, project_id):
 def update_project_task_notes(task_id, notes):
     conn = sqlite3.connect(DB_PATH)
     conn.execute("UPDATE project_tasks SET notes=? WHERE id=?", (notes or '', task_id))
+    conn.commit()
+    conn.close()
+
+
+def update_project_task(task_id, content, estimate, priority, notes, highlight_color, scheduled_date):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE project_tasks SET content=?, estimate_minutes=?, priority=?, notes=?, "
+        "highlight_color=?, scheduled_date=? WHERE id=?",
+        (content, estimate, priority, notes or '', highlight_color or '', scheduled_date or '', task_id)
+    )
     conn.commit()
     conn.close()
 
@@ -4390,19 +4407,36 @@ def _render_project_detail(project_id):
     done_tasks   = [t for t in tasks if t[5]]
     today_str    = date.today().isoformat()
 
+    PRESET_COLORS = [
+        ("Kein", ""),
+        ("🟡 Gelb",  "#ffd700"),
+        ("🔴 Rot",   "#e74c3c"),
+        ("🟢 Grün",  "#2ecc71"),
+        ("🔵 Blau",  "#3498db"),
+        ("🟣 Lila",  "#9b59b6"),
+        ("🟠 Orange","#f39c12"),
+        ("⚪ Weiß",  "#ecf0f1"),
+    ]
+
     if undone_tasks:
         st.subheader(f"📋 Offen ({len(undone_tasks)})")
         for i, t in enumerate(undone_tasks):
-            task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes = t
-            is_today  = scheduled_date == today_str
-            card_bg   = "rgba(255,215,0,0.06)" if is_today else "rgba(255,255,255,0.03)"
-            border_c  = "#ffd700" if is_today else color
-            notes_preview = f'<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:4px;white-space:pre-wrap">{notes[:120]}{"…" if len(notes)>120 else ""}</div>' if notes else ""
+            task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes, hl_color = t
+            is_today   = scheduled_date == today_str
+            border_c   = hl_color if hl_color else ("#ffd700" if is_today else color)
+            card_bg    = f"{hl_color}12" if hl_color else ("rgba(255,215,0,0.06)" if is_today else "rgba(255,255,255,0.03)")
+            edit_open  = st.session_state.get(f"pt_edit_{task_id}", False)
+
+            notes_preview = (
+                f'<div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:5px;'
+                f'white-space:pre-wrap;border-left:2px solid rgba(255,255,255,.15);padding-left:8px">'
+                f'{notes[:160]}{"…" if len(notes)>160 else ""}</div>'
+            ) if notes and not edit_open else ""
 
             st.markdown(
                 f'<div style="border-left:4px solid {border_c};background:{card_bg};'
-                f'border-radius:8px;padding:10px 14px;margin-bottom:2px">'
-                f'<strong>{content}</strong>'
+                f'border-radius:10px;padding:10px 16px;margin-bottom:2px">'
+                f'<strong style="font-size:14px">{content}</strong>'
                 + (f'<span class="dl-badge" style="color:#ffd700">📅 Heute</span>' if is_today else
                    f'<span class="dl-badge">{scheduled_date}</span>' if scheduled_date else "")
                 + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else "")
@@ -4410,7 +4444,8 @@ def _render_project_detail(project_id):
                 + notes_preview + '</div>', unsafe_allow_html=True
             )
 
-            cc, cup, cdn, cnotes, cdel, _ = st.columns([0.06, 0.07, 0.07, 0.14, 0.07, 0.59])
+            # Action row
+            cc, cup, cdn, cedit, cdel = st.columns([0.06, 0.06, 0.06, 0.16, 0.06])
             with cc:
                 if st.checkbox("", value=False, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
                     toggle_project_task_done(task_id, True)
@@ -4420,42 +4455,79 @@ def _render_project_detail(project_id):
                     move_project_task(task_id, -1, pid)
                     st.rerun()
             with cdn:
-                if i < len(undone_tasks) - 1 and st.button("↓", key=f"pt_dn_{task_id}", use_container_width=True):
+                if i < len(undone_tasks)-1 and st.button("↓", key=f"pt_dn_{task_id}", use_container_width=True):
                     move_project_task(task_id, 1, pid)
                     st.rerun()
-            with cnotes:
-                note_key = f"show_note_{task_id}"
-                note_lbl = "📝 Notiz" if not notes else "📝 Notiz ●"
-                if st.button(note_lbl, key=f"pt_notebtn_{task_id}", use_container_width=True):
-                    st.session_state[note_key] = not st.session_state.get(note_key, False)
+            with cedit:
+                edit_lbl = "✕ Schließen" if edit_open else "✏️ Bearbeiten"
+                if st.button(edit_lbl, key=f"pt_editbtn_{task_id}", use_container_width=True):
+                    st.session_state[f"pt_edit_{task_id}"] = not edit_open
                     st.rerun()
             with cdel:
                 if st.button("🗑️", key=f"pt_del_{task_id}", use_container_width=True):
                     delete_project_task(task_id)
+                    st.session_state.pop(f"pt_edit_{task_id}", None)
                     st.rerun()
 
-            if st.session_state.get(f"show_note_{task_id}"):
-                with st.form(f"note_form_{task_id}"):
-                    new_note = st.text_area("Notizen zur Aufgabe", value=notes or "",
-                                            height=100, placeholder="Gedanken, Links, Zwischenstände...",
-                                            key=f"note_inp_{task_id}")
-                    ns, nc = st.columns(2)
-                    with ns:
+            # Inline full editor
+            if edit_open:
+                with st.form(f"pt_edit_form_{task_id}"):
+                    new_content = st.text_input("Aufgabe", value=content, key=f"pe_cnt_{task_id}")
+
+                    ea, eb, ec = st.columns(3)
+                    with ea:
+                        new_est = st.number_input("⏱️ Minuten", min_value=1, step=5,
+                                                   value=int(estimate or 30), key=f"pe_est_{task_id}")
+                    with eb:
+                        new_prio = st.slider("★ Priorität", 0, 10,
+                                             value=int(priority or 5), key=f"pe_prio_{task_id}")
+                    with ec:
+                        try:
+                            sd_val = date.fromisoformat(scheduled_date) if scheduled_date else date.today()
+                        except Exception:
+                            sd_val = date.today()
+                        new_date = st.date_input("📅 Datum", value=sd_val, key=f"pe_date_{task_id}")
+
+                    # Color picker row
+                    st.markdown("**🎨 Hervorhebungsfarbe**")
+                    color_cols = st.columns(len(PRESET_COLORS))
+                    selected_color = hl_color  # will be overridden by radio
+                    color_labels = [p[0] for p in PRESET_COLORS]
+                    cur_color_idx = next((i for i, p in enumerate(PRESET_COLORS) if p[1] == hl_color), 0)
+                    chosen_label = st.radio("Farbe", color_labels, index=cur_color_idx,
+                                            horizontal=True, label_visibility="collapsed",
+                                            key=f"pe_color_{task_id}")
+                    chosen_color = next((p[1] for p in PRESET_COLORS if p[0] == chosen_label), "")
+                    # Custom color picker
+                    use_custom = st.checkbox("Eigene Farbe", key=f"pe_custom_chk_{task_id}")
+                    if use_custom:
+                        chosen_color = st.color_picker("Farbe wählen",
+                                                        value=hl_color if hl_color else "#ffffff",
+                                                        key=f"pe_cpick_{task_id}")
+
+                    new_notes = st.text_area("📝 Notizen", value=notes or "", height=120,
+                                             placeholder="Gedanken, Links, Zwischenstände, Quellen...",
+                                             key=f"pe_notes_{task_id}")
+
+                    fs, fc = st.columns(2)
+                    with fs:
                         if st.form_submit_button("💾 Speichern", use_container_width=True):
-                            update_project_task_notes(task_id, new_note.strip())
-                            st.session_state.pop(f"show_note_{task_id}", None)
+                            update_project_task(task_id, new_content.strip(), new_est, new_prio,
+                                                new_notes.strip(), chosen_color,
+                                                new_date.isoformat())
+                            st.session_state.pop(f"pt_edit_{task_id}", None)
                             st.rerun()
-                    with nc:
+                    with fc:
                         if st.form_submit_button("✕ Abbrechen", use_container_width=True):
-                            st.session_state.pop(f"show_note_{task_id}", None)
+                            st.session_state.pop(f"pt_edit_{task_id}", None)
                             st.rerun()
 
-            st.markdown('<div style="margin-bottom:4px"></div>', unsafe_allow_html=True)
+            st.markdown('<div style="margin-bottom:2px"></div>', unsafe_allow_html=True)
 
     if done_tasks:
         with st.expander(f"✅ Erledigt ({len(done_tasks)})"):
             for t in done_tasks:
-                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes = t
+                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes, hl_color = t
                 st.markdown(f'<div style="opacity:.4;text-decoration:line-through;padding:4px 0">{content}'
                             + (f' <small>({estimate} min)</small>' if estimate else '') + '</div>',
                             unsafe_allow_html=True)
