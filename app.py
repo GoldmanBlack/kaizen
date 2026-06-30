@@ -104,6 +104,25 @@ CAL_TRACKS = {
     },
 }
 
+# ─── Schlafrythmus & Abend-/Morgenroutine ─────────────────────────
+EVENING_ROUTINE_TASKS = [
+    {'key': 'phone_bed', 'icon': '📱', 'label': 'Handy ans Bett legen (Schlaf-Tracking starten)'},
+    {'key': 'teeth',     'icon': '🦷', 'label': 'Zähne putzen'},
+    {'key': 'shower',    'icon': '🚿', 'label': 'Duschen'},
+    {'key': 'desk',      'icon': '🧹', 'label': 'Schreibtisch kurz aufräumen'},
+    {'key': 'water_pm',  'icon': '💧', 'label': 'Glas Wasser ans Bett stellen'},
+    {'key': 'mat_pm',    'icon': '🧘', 'label': '15 Min Chaktimatte / Faszientraining'},
+]
+MORNING_ROUTINE_TASKS = [
+    {'key': 'water_am',  'icon': '💧', 'label': 'Glas Wasser trinken'},
+    {'key': 'breakfast', 'icon': '🍳', 'label': 'Frühstücken'},
+    {'key': 'mat_am',    'icon': '🧘', 'label': 'Chaktimatte / Faszientraining'},
+    {'key': 'no_phone',  'icon': '📵', 'label': 'Erste Stunde kein Handy'},
+]
+SLEEP_RAMP_STEP_MINUTES = 10
+SLEEP_GOAL_BEDTIME = "00:00"
+SLEEP_GOAL_WAKETIME = "08:00"
+
 # ─── Season exclusive item keys (not shown in regular shop) ──────
 SEASON_EXCLUSIVE_KEYS = {
     's1_aura_ocean','s1_aura_star','s1_aura_dawn','s1_aura_cosmic','s1_aura_rift',
@@ -635,6 +654,29 @@ def init_db():
         target_reps INTEGER,
         is_hold INTEGER DEFAULT 0,
         clean INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TEXT
+    )
+    ''')
+    # ─── Schlafrythmus & Routinen ───────────────────────────────
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS routine_checks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_date TEXT NOT NULL,
+        routine TEXT NOT NULL,
+        task_key TEXT NOT NULL,
+        done INTEGER DEFAULT 0,
+        created_at TEXT,
+        UNIQUE(log_date, routine, task_key)
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS sleep_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        log_date TEXT UNIQUE NOT NULL,
+        quality_pct INTEGER,
+        bedtime TEXT,
+        wake_time TEXT,
         notes TEXT,
         created_at TEXT
     )
@@ -1819,6 +1861,253 @@ def get_todays_training_entry_id():
     return row if row else (None, 0)
 
 
+# ========== SCHLAFRYTHMUS & ROUTINEN ==========
+
+def _sleep_scale(hhmm):
+    """Wandelt 'HH:MM' in eine monoton steigende Skala ab 18:00 um (für Bettzeit-Rechnungen über Mitternacht)."""
+    h, m = map(int, hhmm.split(':'))
+    return ((h - 18) % 24) * 60 + m
+
+
+def _sleep_unscale(scale):
+    scale = int(scale) % 1440
+    h = (18 + scale // 60) % 24
+    m = scale % 60
+    return f"{h:02d}:{m:02d}"
+
+
+def get_sleep_target_bedtime():
+    """Heutige Ziel-Bettzeit auf der Rampe Richtung 00:00 (10 Min/Tag früher, ausgehend von der Baseline)."""
+    start_str = get_setting('sleep_program_start_date')
+    baseline = get_setting('sleep_baseline_bedtime', '02:30')
+    if not start_str:
+        start_str = date.today().isoformat()
+        set_setting('sleep_program_start_date', start_str)
+    try:
+        start_date = date.fromisoformat(start_str)
+    except Exception:
+        start_date = date.today()
+    days_elapsed = max(0, (date.today() - start_date).days)
+    baseline_scale = _sleep_scale(baseline)
+    goal_scale = _sleep_scale(SLEEP_GOAL_BEDTIME)
+    target_scale = max(goal_scale, baseline_scale - SLEEP_RAMP_STEP_MINUTES * days_elapsed)
+    reached_goal = target_scale <= goal_scale
+    total_steps = max(1, math.ceil((baseline_scale - goal_scale) / SLEEP_RAMP_STEP_MINUTES))
+    days_to_goal = max(0, total_steps - days_elapsed)
+    progress_pct = int(round(min(100, days_elapsed / total_steps * 100)))
+    return {
+        'target_time': _sleep_unscale(target_scale),
+        'baseline': baseline,
+        'days_elapsed': days_elapsed,
+        'reached_goal': reached_goal,
+        'days_to_goal': days_to_goal,
+        'progress_pct': progress_pct,
+    }
+
+
+def get_routine_checks(log_date, routine_type):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT task_key, done FROM routine_checks WHERE log_date=? AND routine=?",
+        (log_date, routine_type)
+    ).fetchall()
+    conn.close()
+    return {k: bool(d) for k, d in rows}
+
+
+def set_routine_check(log_date, routine_type, task_key, done):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''INSERT INTO routine_checks (log_date, routine, task_key, done, created_at)
+                     VALUES (?,?,?,?,?)
+                     ON CONFLICT(log_date, routine, task_key) DO UPDATE SET done=excluded.done''',
+                 (log_date, routine_type, task_key, int(done), now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def routine_adherence(log_date, routine_type):
+    tasks = EVENING_ROUTINE_TASKS if routine_type == 'evening' else MORNING_ROUTINE_TASKS
+    checks = get_routine_checks(log_date, routine_type)
+    done = sum(1 for t in tasks if checks.get(t['key']))
+    return done / len(tasks)
+
+
+def log_sleep(log_date, quality_pct, bedtime=None, wake_time=None, notes=''):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''INSERT INTO sleep_logs (log_date, quality_pct, bedtime, wake_time, notes, created_at)
+                     VALUES (?,?,?,?,?,?)
+                     ON CONFLICT(log_date) DO UPDATE SET
+                       quality_pct=excluded.quality_pct, bedtime=excluded.bedtime,
+                       wake_time=excluded.wake_time, notes=excluded.notes''',
+                 (log_date, quality_pct, bedtime, wake_time, notes, now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def get_sleep_log(log_date):
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute(
+        "SELECT quality_pct, bedtime, wake_time, notes FROM sleep_logs WHERE log_date=?", (log_date,)
+    ).fetchone()
+    conn.close()
+    if not row:
+        return None
+    return {'quality_pct': row[0], 'bedtime': row[1], 'wake_time': row[2], 'notes': row[3]}
+
+
+def get_routine_streak(routine_type):
+    """Streak voller (100%) Tage für eine Routine."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT log_date, SUM(done), COUNT(*) FROM routine_checks WHERE routine=? GROUP BY log_date",
+        (routine_type,)
+    ).fetchall()
+    conn.close()
+    total_tasks = len(EVENING_ROUTINE_TASKS if routine_type == 'evening' else MORNING_ROUTINE_TASKS)
+    full_dates = {d for d, done_sum, cnt in rows if cnt >= total_tasks and (done_sum or 0) >= total_tasks}
+
+    if not full_dates:
+        return {'current': 0, 'longest': 0, 'dates': full_dates}
+
+    today = date.today()
+    cur = 0
+    d = today if today.isoformat() in full_dates else today - timedelta(days=1)
+    while d.isoformat() in full_dates:
+        cur += 1
+        d -= timedelta(days=1)
+
+    sorted_dates = sorted(date.fromisoformat(x) for x in full_dates)
+    longest = run = 1
+    for i in range(1, len(sorted_dates)):
+        if (sorted_dates[i] - sorted_dates[i - 1]).days == 1:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    longest = max(longest, cur)
+    return {'current': cur, 'longest': longest, 'dates': full_dates}
+
+
+def _daily_productivity_series(start_date, end_date):
+    """date_str -> {completion_rate, points, tasks_done, first_action_min}, aus echten entries-Daten."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT entry_date, done, points, started_at, completed_at FROM entries "
+        "WHERE entry_date BETWEEN ? AND ?", (start_date.isoformat(), end_date.isoformat())
+    ).fetchall()
+    conn.close()
+    agg = {}
+    for entry_date, done, points, started_at, completed_at in rows:
+        a = agg.setdefault(entry_date, {'total': 0, 'done': 0, 'points': 0, 'first_ts': None})
+        a['total'] += 1
+        a['done'] += done or 0
+        a['points'] += points or 0
+        ts = started_at or completed_at
+        if ts:
+            try:
+                t = datetime.fromisoformat(ts)
+                if a['first_ts'] is None or t < a['first_ts']:
+                    a['first_ts'] = t
+            except Exception:
+                pass
+    out = {}
+    for d, a in agg.items():
+        first_min = (a['first_ts'].hour * 60 + a['first_ts'].minute) if a['first_ts'] else None
+        out[d] = {
+            'completion_rate': a['done'] / a['total'] if a['total'] else 0,
+            'points': a['points'],
+            'tasks_done': a['done'],
+            'first_action_min': first_min,
+        }
+    return out
+
+
+def _routine_adherence_map(routine_type):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT log_date, SUM(done), COUNT(*) FROM routine_checks WHERE routine=? GROUP BY log_date",
+        (routine_type,)
+    ).fetchall()
+    conn.close()
+    total_tasks = len(EVENING_ROUTINE_TASKS if routine_type == 'evening' else MORNING_ROUTINE_TASKS)
+    return {d: (done_sum or 0) / total_tasks for d, done_sum, cnt in rows}
+
+
+def _sleep_quality_map(start_date, end_date):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT log_date, quality_pct FROM sleep_logs WHERE log_date BETWEEN ? AND ? AND quality_pct IS NOT NULL",
+        (start_date.isoformat(), end_date.isoformat())
+    ).fetchall()
+    conn.close()
+    return {d: q for d, q in rows}
+
+
+def analyze_routine_patterns(min_n=3):
+    """Echte Mustererkennung: vergleicht Tage mit vollständiger Routine/guter Schlafqualität gegen den Rest,
+    basierend auf den tatsächlichen entries-Daten. Liefert None pro Vergleich wenn die Datenlage zu dünn ist."""
+    today = date.today()
+    start = today - timedelta(days=60)
+    prod = _daily_productivity_series(start, today)
+    morning_adh = _routine_adherence_map('morning')
+    evening_adh = _routine_adherence_map('evening')
+    sleep_q = _sleep_quality_map(start, today)
+
+    def split(adh_map, shift_days, metric):
+        hi, lo = [], []
+        for d_str, adh in adh_map.items():
+            try:
+                d = date.fromisoformat(d_str)
+            except Exception:
+                continue
+            target = (d + timedelta(days=shift_days)).isoformat()
+            p = prod.get(target)
+            if not p or p.get(metric) is None:
+                continue
+            (hi if adh >= 0.999 else lo).append(p[metric])
+        return hi, lo
+
+    def avg(lst):
+        return sum(lst) / len(lst) if lst else None
+
+    results = {}
+
+    hi, lo = split(morning_adh, 0, 'completion_rate')
+    results['morning_completion'] = (
+        {'hi_avg': avg(hi) * 100, 'lo_avg': avg(lo) * 100, 'n_hi': len(hi), 'n_lo': len(lo)}
+        if len(hi) >= min_n and len(lo) >= min_n else None
+    )
+
+    hi, lo = split(evening_adh, 1, 'completion_rate')
+    results['evening_next_completion'] = (
+        {'hi_avg': avg(hi) * 100, 'lo_avg': avg(lo) * 100, 'n_hi': len(hi), 'n_lo': len(lo)}
+        if len(hi) >= min_n and len(lo) >= min_n else None
+    )
+
+    hi, lo = split(morning_adh, 0, 'first_action_min')
+    results['speed'] = (
+        {'hi_avg': avg(hi), 'lo_avg': avg(lo), 'n_hi': len(hi), 'n_lo': len(lo)}
+        if len(hi) >= min_n and len(lo) >= min_n else None
+    )
+
+    sq_hi, sq_lo = [], []
+    for d_str, q in sleep_q.items():
+        p = prod.get(d_str)
+        if not p:
+            continue
+        (sq_hi if q >= 75 else sq_lo).append(p['completion_rate'])
+    results['sleep_quality'] = (
+        {'hi_avg': avg(sq_hi) * 100, 'lo_avg': avg(sq_lo) * 100, 'n_hi': len(sq_hi), 'n_lo': len(sq_lo)}
+        if len(sq_hi) >= min_n and len(sq_lo) >= min_n else None
+    )
+
+    return results
+
+
 # ========== RECURRING TASKS ==========
 
 DAY_ABBR = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -2603,6 +2892,87 @@ JSON-Format:
   "weak_track": "Track-Key (push/pull/legs/core/skill_handstand/skill_muscleup) der am meisten Aufmerksamkeit braucht, oder null",
   "strong_track": "Track-Key mit dem besten Fortschritt, oder null",
   "next_focus": "1 konkrete Handlungsempfehlung für die nächste Einheit",
+  "motivation": "1 kurzer, ehrlicher Motivationssatz passend zur Datenlage"
+}}"""
+            }],
+            max_tokens=700,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ki_sleep_coach(api_key):
+    """Analysiert Schlafrythmus-Fortschritt, Routine-Adhärenz und die echten Korrelationen zur Produktivität."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+        today = date.today()
+        target = get_sleep_target_bedtime()
+        morning_streak = get_routine_streak('morning')
+        evening_streak = get_routine_streak('evening')
+        patterns = analyze_routine_patterns()
+
+        conn = sqlite3.connect(DB_PATH)
+        recent_sleep = conn.execute(
+            "SELECT log_date, quality_pct, bedtime, wake_time FROM sleep_logs "
+            "WHERE log_date >= date(?, '-14 days') ORDER BY log_date", (today.isoformat(),)
+        ).fetchall()
+        conn.close()
+
+        sleep_str = "\n".join(
+            f'- {r[0]}: {r[1]}% Qualität' + (f', Bettzeit {r[2]}' if r[2] else '') + (f', Aufstehen {r[3]}' if r[3] else '')
+            for r in recent_sleep
+        ) or "Noch keine Schlafdaten eingetragen."
+
+        def fmt_pattern(p, unit="% Erledigungsquote"):
+            if not p:
+                return "noch nicht genug Daten"
+            return f"{p['hi_avg']:.0f}{unit} (n={p['n_hi']}) vs. {p['lo_avg']:.0f}{unit} (n={p['n_lo']})"
+
+        pattern_str = (
+            f"Morgenroutine voll vs. nicht voll → Erledigungsquote selber Tag: {fmt_pattern(patterns['morning_completion'])}\n"
+            f"Abendroutine voll vs. nicht voll → Erledigungsquote Folgetag: {fmt_pattern(patterns['evening_next_completion'])}\n"
+            f"Schlafqualität ≥75% vs. <75% → Erledigungsquote selber Tag: {fmt_pattern(patterns['sleep_quality'])}\n"
+        )
+        ramp_status = "Ziel erreicht" if target['reached_goal'] else f"noch {target['days_to_goal']} Tage bis 00:00"
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    f"Du bist ein ruhiger, sachlicher Schlaf- und Routine-Coach für einen ADHS-Athleten. "
+                    f"Heute ist {today.isoformat()}. Der Nutzer baut seinen Schlafrythmus schrittweise (10 Min/Tag) "
+                    f"Richtung 00:00 Bettzeit und 08:00 Aufstehen um. Analysiere die echten Daten unten und gib "
+                    "eine kurze, ehrliche Einschätzung — keine generischen Schlaftipps, sondern was die Daten "
+                    "konkret zeigen. Antworte ausschließlich mit validem JSON."
+                )
+            }, {
+                "role": "user",
+                "content": f"""BETTZEIT-RAMPE: heutiges Ziel {target['target_time']} Uhr (Tag {target['days_elapsed']+1}, {ramp_status}).
+
+ROUTINE-STREAKS: Morgenroutine {morning_streak['current']} Tage am Stück voll, Abendroutine {evening_streak['current']} Tage am Stück voll.
+
+SCHLAFDATEN (letzte 14 Tage):
+{sleep_str}
+
+ECHTE MUSTER AUS DEN DATEN:
+{pattern_str}
+
+JSON-Format:
+{{
+  "headline": "Kurzer Coach-Satz zur aktuellen Lage (1 Satz)",
+  "pattern_detected": "Was die Daten konkret zeigen, ehrlich auch wenn 'noch nicht genug Daten'",
+  "biggest_lever": "Welche EINE Sache (Bettzeit, Morgenroutine, Abendroutine) hätte aktuell den größten Hebel",
+  "next_step": "1 konkrete, kleine Handlungsempfehlung für heute/morgen",
   "motivation": "1 kurzer, ehrlicher Motivationssatz passend zur Datenlage"
 }}"""
             }],
@@ -3564,8 +3934,10 @@ def render_planen_page():
     brain_rows      = [r for r in rows if r[1] == "brain"]
     # Step 4 is "ready" when all brain tasks have at least a category or micro
     has_todo_setup  = bool(brain_rows) and all(r[14] or r[15] for r in brain_rows)
-    steps_done      = sum([has_brain, has_highlight, has_micro])
-    total_steps     = 4
+    today_str       = date.today().isoformat()
+    has_morning     = routine_adherence(today_str, 'morning') >= 0.999
+    steps_done      = sum([has_morning, has_brain, has_highlight, has_micro])
+    total_steps     = 5
 
     st.progress(steps_done / total_steps, text=f"Schritt {steps_done} von {total_steps} abgeschlossen")
 
@@ -3577,6 +3949,11 @@ def render_planen_page():
                 st.rerun()
 
     st.markdown("---")
+
+    # Step 0: Morgenroutine
+    step0_label = "✅ Morgenroutine erledigt" if has_morning else "0️⃣  Morgenroutine — Die erste Stunde"
+    with st.expander(step0_label, expanded=not has_morning):
+        render_morning_routine_checklist(today_str)
 
     # Step 1: Brain Dump
     step1_label = "✅ Brain Dump erledigt" if has_brain else "1️⃣  Brain Dump — Alles raus aus dem Kopf"
@@ -6706,6 +7083,273 @@ def render_training_page():
     st.markdown(_cal_heatmap_html(), unsafe_allow_html=True)
 
 
+# ========== SCHLAF & ROUTINEN SEITE ==========
+
+def _sleep_ramp_hero_html(target):
+    baseline_scale = _sleep_scale(target['baseline'])
+    goal_scale = _sleep_scale(SLEEP_GOAL_BEDTIME)
+    target_scale = _sleep_scale(target['target_time'])
+    span = max(1, baseline_scale - goal_scale)
+    pos_pct = max(0, min(100, (baseline_scale - target_scale) / span * 100))
+    status = "🎉 Ziel erreicht!" if target['reached_goal'] else f"noch {target['days_to_goal']} Tage bis 00:00"
+
+    return f"""<div style="background:linear-gradient(135deg,rgba(155,89,182,0.08),rgba(52,152,219,0.05));
+  border:1px solid rgba(155,89,182,0.25);border-radius:16px;padding:20px 24px">
+  <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1px;text-transform:uppercase">Heutige Ziel-Bettzeit</div>
+      <div style="font-size:34px;font-weight:900;color:#a29bfe">{target['target_time']} Uhr</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:1px;text-transform:uppercase">Aufstehen</div>
+      <div style="font-size:20px;font-weight:800;color:#00d4ff">{SLEEP_GOAL_WAKETIME} Uhr · 8h Schlaf</div>
+    </div>
+  </div>
+  <div style="position:relative;height:8px;background:rgba(255,255,255,0.08);border-radius:4px;margin-bottom:8px">
+    <div style="position:absolute;left:0;top:0;height:100%;width:{pos_pct:.1f}%;
+                background:linear-gradient(90deg,#9b59b6,#a29bfe);border-radius:4px"></div>
+  </div>
+  <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,0.35)">
+    <span>Start: {target['baseline']} Uhr</span>
+    <span style="font-weight:700;color:rgba(255,255,255,0.55)">{status}</span>
+    <span>Ziel: 00:00 Uhr</span>
+  </div>
+</div>"""
+
+
+def _routine_heatmap_html(routine_type, days=60):
+    today_d = date.today()
+    color = "#3498db" if routine_type == 'morning' else "#9b59b6"
+    label = "Morgenroutine" if routine_type == 'morning' else "Abendroutine"
+    adh_map = _routine_adherence_map(routine_type)
+
+    def cell_color(frac):
+        if not frac:
+            return "rgba(255,255,255,0.05)"
+        if frac >= 1:
+            return color
+        if frac >= 0.5:
+            return f"{color}88"
+        return f"{color}44"
+
+    cells = ""
+    for i in range(days - 1, -1, -1):
+        d = today_d - timedelta(days=i)
+        frac = adh_map.get(d.isoformat())
+        tip = f"{d.strftime('%d.%m')}: {int((frac or 0) * 100)}%"
+        cells += f'<div title="{tip}" style="width:14px;height:14px;background:{cell_color(frac)};border-radius:2px;flex-shrink:0"></div>'
+
+    return f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 16px;
+  border:1px solid rgba(255,255,255,0.07)">
+  <div style="font-size:12px;font-weight:700;color:white;margin-bottom:8px">{label}</div>
+  <div style="display:flex;flex-wrap:wrap;gap:3px;width:calc(14*(14px + 3px))">
+    {cells}
+  </div>
+</div>"""
+
+
+def render_morning_routine_checklist(today_str=None):
+    """Eingebettete Morgenroutine-Checkliste, wiederverwendet in Planen (Schritt 0) und der Schlaf-Seite."""
+    today_str = today_str or date.today().isoformat()
+    checks_am = get_routine_checks(today_str, 'morning')
+    for t in MORNING_ROUTINE_TASKS:
+        cur = checks_am.get(t['key'], False)
+        new = st.checkbox(f"{t['icon']} {t['label']}", value=cur, key=f"morning_chk_{t['key']}_{today_str}")
+        if new != cur:
+            set_routine_check(today_str, 'morning', t['key'], new)
+            st.rerun()
+
+
+def render_sleep_page():
+    st.title("🌙 Schlaf & Routinen")
+    st.caption("Die erste und letzte Stunde des Tages — die Basis für alles andere.")
+
+    today_str = date.today().isoformat()
+    target = get_sleep_target_bedtime()
+
+    st.markdown(_sleep_ramp_hero_html(target), unsafe_allow_html=True)
+
+    with st.expander("⚙️ Bettzeit-Rampe anpassen"):
+        st.caption("Baseline = deine aktuelle, tatsächliche Bettzeit. Das Programm steigert sich von dort "
+                   "täglich 10 Minuten Richtung 00:00.")
+        bc1, bc2 = st.columns(2)
+        with bc1:
+            new_baseline = st.text_input("Baseline-Bettzeit (HH:MM)", value=target['baseline'],
+                                         key="sleep_baseline_input")
+        with bc2:
+            st.write("")
+            st.write("")
+            if st.button("Rampe neu starten ab heute", key="sleep_restart_ramp"):
+                try:
+                    _sleep_scale(new_baseline)
+                    set_setting('sleep_baseline_bedtime', new_baseline)
+                    set_setting('sleep_program_start_date', today_str)
+                    st.rerun()
+                except Exception:
+                    st.error("Bitte im Format HH:MM eingeben, z.B. 02:30")
+
+    st.markdown("---")
+
+    # ── Streaks ──────────────────────────────────────────────────
+    morning_streak = get_routine_streak('morning')
+    evening_streak = get_routine_streak('evening')
+    s1, s2 = st.columns(2)
+    with s1:
+        st.markdown(f"""<div style="text-align:center;background:rgba(52,152,219,0.06);border-radius:14px;
+            padding:14px;border:1px solid rgba(52,152,219,0.25)">
+            <div style="font-size:24px">🌅</div>
+            <div style="font-size:22px;font-weight:900;color:#3498db">{morning_streak['current']}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4)">TAGE MORGENROUTINE VOLL</div>
+        </div>""", unsafe_allow_html=True)
+    with s2:
+        st.markdown(f"""<div style="text-align:center;background:rgba(155,89,182,0.06);border-radius:14px;
+            padding:14px;border:1px solid rgba(155,89,182,0.25)">
+            <div style="font-size:24px">🌙</div>
+            <div style="font-size:22px;font-weight:900;color:#9b59b6">{evening_streak['current']}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4)">TAGE ABENDROUTINE VOLL</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Checklisten ──────────────────────────────────────────────
+    cc1, cc2 = st.columns(2)
+    with cc1:
+        st.markdown("#### 🌅 Morgenroutine")
+        render_morning_routine_checklist(today_str)
+    with cc2:
+        evening_start = None
+        try:
+            evening_start = _sleep_unscale(_sleep_scale(target['target_time']) - 60)
+        except Exception:
+            pass
+        st.markdown(f"#### 🌙 Abendroutine{f' (ab {evening_start} Uhr)' if evening_start else ''}")
+        checks_pm = get_routine_checks(today_str, 'evening')
+        for t in EVENING_ROUTINE_TASKS:
+            cur = checks_pm.get(t['key'], False)
+            new = st.checkbox(f"{t['icon']} {t['label']}", value=cur, key=f"sleep_pm_{t['key']}_{today_str}")
+            if new != cur:
+                set_routine_check(today_str, 'evening', t['key'], new)
+                st.rerun()
+
+    st.markdown("---")
+
+    # ── Schlaf-Eingabe ───────────────────────────────────────────
+    st.markdown("#### 😴 Schlaf von letzter Nacht (aus Sleep Cycle)")
+    existing = get_sleep_log(today_str)
+    with st.form("sleep_log_form"):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            quality = st.slider("Schlafqualität (%)", 0, 100,
+                                value=existing['quality_pct'] if existing and existing['quality_pct'] is not None else 70)
+        with sc2:
+            bedtime_in = st.text_input("Bettzeit (HH:MM)",
+                                       value=existing['bedtime'] if existing and existing['bedtime'] else "")
+        with sc3:
+            wake_in = st.text_input("Aufstehzeit (HH:MM)",
+                                    value=existing['wake_time'] if existing and existing['wake_time'] else "")
+        if st.form_submit_button("💾 Schlaf speichern"):
+            log_sleep(today_str, quality, bedtime_in or None, wake_in or None)
+            st.success("Gespeichert!")
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── Muster & Korrelation ───────────────────────────────────────
+    st.markdown("### 🔍 Echte Muster aus deinen Daten")
+    st.caption("Kein generischer Tipp — Vergleich deiner eigenen Tage mit vs. ohne vollständige Routine/guten Schlaf.")
+    patterns = analyze_routine_patterns()
+
+    def render_pattern_card(title, data, icon, unit="%", higher_is_better=True, fmt=lambda v: f"{v:.0f}"):
+        if not data:
+            st.info(f"{icon} **{title}**: Noch nicht genug Datenpunkte (mind. 3 Tage je Gruppe) — "
+                    "sammle weiter Daten für eine zuverlässige Aussage.")
+            return
+        delta = data['hi_avg'] - data['lo_avg']
+        better = (delta > 0) if higher_is_better else (delta < 0)
+        col = "#2ecc71" if better else "#e74c3c"
+        arrow = "↑" if delta > 0 else "↓"
+        st.markdown(f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 18px;
+            border:1px solid rgba(255,255,255,0.08);margin-bottom:10px">
+            <div style="font-size:12.5px;font-weight:700;color:white;margin-bottom:6px">{icon} {title}</div>
+            <div style="display:flex;gap:24px;align-items:baseline;flex-wrap:wrap">
+                <div><span style="font-size:20px;font-weight:900;color:{col}">{fmt(data['hi_avg'])}{unit}</span>
+                     <span style="font-size:10px;color:rgba(255,255,255,0.4)"> (n={data['n_hi']})</span></div>
+                <div style="color:rgba(255,255,255,0.3)">vs.</div>
+                <div><span style="font-size:20px;font-weight:700;color:rgba(255,255,255,0.5)">{fmt(data['lo_avg'])}{unit}</span>
+                     <span style="font-size:10px;color:rgba(255,255,255,0.4)"> (n={data['n_lo']})</span></div>
+                <div style="font-size:13px;color:{col};font-weight:700">{arrow} {abs(delta):.0f}{unit}</div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+    render_pattern_card("Morgenroutine voll → Erledigungsquote selber Tag", patterns['morning_completion'], "🌅")
+    render_pattern_card("Abendroutine voll → Erledigungsquote Folgetag", patterns['evening_next_completion'], "🌙")
+    render_pattern_card("Schlafqualität ≥75% → Erledigungsquote selber Tag", patterns['sleep_quality'], "😴")
+
+    speed = patterns['speed']
+    if speed:
+        delta = speed['lo_avg'] - speed['hi_avg']
+        col = "#2ecc71" if delta > 0 else "#e74c3c"
+
+        def fmt_min(m):
+            h, mm = divmod(int(round(m)), 60)
+            return f"{h:02d}:{mm:02d}"
+
+        st.markdown(f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 18px;
+            border:1px solid rgba(255,255,255,0.08);margin-bottom:10px">
+            <div style="font-size:12.5px;font-weight:700;color:white;margin-bottom:6px">
+                ⚡ Morgenroutine voll → Zeit bis zur ersten erledigten Aufgabe</div>
+            <div style="display:flex;gap:24px;align-items:baseline;flex-wrap:wrap">
+                <div><span style="font-size:20px;font-weight:900;color:{col}">{fmt_min(speed['hi_avg'])} Uhr</span>
+                     <span style="font-size:10px;color:rgba(255,255,255,0.4)"> (n={speed['n_hi']})</span></div>
+                <div style="color:rgba(255,255,255,0.3)">vs.</div>
+                <div><span style="font-size:20px;font-weight:700;color:rgba(255,255,255,0.5)">{fmt_min(speed['lo_avg'])} Uhr</span>
+                     <span style="font-size:10px;color:rgba(255,255,255,0.4)"> (n={speed['n_lo']})</span></div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.info("⚡ **Morgenroutine → Geschwindigkeit**: Noch nicht genug Datenpunkte.")
+
+    st.markdown("---")
+
+    # ── KI Schlafcoach ───────────────────────────────────────────
+    st.markdown("### 🤖 KI Schlafcoach")
+    api_key = get_setting('nvidia_api_key', '')
+    if not api_key:
+        st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
+    else:
+        if st.button("🧠 Schlaf & Routinen analysieren", key="sleep_coach_btn"):
+            with st.spinner("Coach analysiert deine Daten…"):
+                st.session_state['_sleep_coach_result'] = ki_sleep_coach(api_key)
+        result = st.session_state.get('_sleep_coach_result')
+        if result:
+            if result.get('error'):
+                st.error(f"Fehler: {result['error']}")
+            else:
+                st.markdown(f"""<div style="background:rgba(155,89,182,0.06);border:1px solid rgba(155,89,182,0.25);
+                    border-radius:14px;padding:18px 20px">
+                    <div style="font-size:15px;font-weight:800;color:#a29bfe;margin-bottom:10px">
+                        🎙️ {result.get('headline','')}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Muster:</strong> {result.get('pattern_detected','')}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Größter Hebel:</strong> {result.get('biggest_lever','')}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Nächster Schritt:</strong> {result.get('next_step','')}</div>
+                    <div style="font-size:12.5px;color:rgba(255,255,255,0.5);font-style:italic">
+                        {result.get('motivation','')}</div>
+                </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Konsistenz-Heatmaps ───────────────────────────────────────
+    st.markdown("### 📅 Konsistenz (letzte 60 Tage)")
+    hc1, hc2 = st.columns(2)
+    with hc1:
+        st.markdown(_routine_heatmap_html('morning'), unsafe_allow_html=True)
+    with hc2:
+        st.markdown(_routine_heatmap_html('evening'), unsafe_allow_html=True)
+
+
 # ========== MAIN ==========
 
 def main():
@@ -6735,7 +7379,7 @@ def main():
     if 'selected_project' not in st.session_state:
         st.session_state.selected_project = None
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
+    PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Schlaf", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -6753,7 +7397,7 @@ def main():
 
     # ── Navigation ────────────────────────────────────────────
     _PAGE_ICONS = {
-        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯", "Training": "🏋️",
+        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯", "Training": "🏋️", "Schlaf": "🌙",
         "Projekte": "📁", "Alle Einträge": "📅", "Routinen": "🔄",
         "Habits": "✅", "Charakter": "🧙", "Season Pass": "🎖️",
         "KI Coach": "🤖", "Statistiken": "📊", "Einstellungen": "⚙️",
@@ -6786,6 +7430,8 @@ def main():
         render_tagesfokus_page()
     elif page == "Training":
         render_training_page()
+    elif page == "Schlaf":
+        render_sleep_page()
     elif page == "Projekte":
         render_projekte_page()
     elif page == "Alle Einträge":
