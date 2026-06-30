@@ -9,6 +9,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 import pandas as pd
 import numpy as np
+import math
+import random
 
 DB_PATH = "kaizen.db"
 
@@ -4615,6 +4617,279 @@ def render_projekte_page():
         st.markdown("")
 
 
+def _activity_markov_chain():
+    """Baut eine 2-Zustands-Markov-Kette (aktiv/inaktiv) aus der kompletten Tagesverlauf-Historie.
+    'aktiv' = an diesem Tag wurde mindestens eine Aufgabe (egal welches Projekt) erledigt."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT entry_date, COALESCE(SUM(done),0) FROM entries "
+        "WHERE entry_date IS NOT NULL AND entry_date != '' GROUP BY entry_date ORDER BY entry_date"
+    ).fetchall()
+    conn.close()
+    if len(rows) < 2:
+        return None
+
+    day_done = {}
+    for d, done_sum in rows:
+        try:
+            date.fromisoformat(d)
+        except (ValueError, TypeError):
+            continue
+        day_done[d] = 1 if (done_sum or 0) > 0 else 0
+    if len(day_done) < 2:
+        return None
+
+    start = date.fromisoformat(min(day_done.keys()))
+    end = date.fromisoformat(max(day_done.keys()))
+    series = []
+    cur = start
+    while cur <= end:
+        series.append(day_done.get(cur.isoformat(), 0))
+        cur += timedelta(days=1)
+
+    trans = {(0, 0): 0, (0, 1): 0, (1, 0): 0, (1, 1): 0}
+    for i in range(len(series) - 1):
+        trans[(series[i], series[i + 1])] += 1
+
+    n0 = trans[(0, 0)] + trans[(0, 1)]
+    n1 = trans[(1, 0)] + trans[(1, 1)]
+    p_inactive_after_inactive = trans[(0, 0)] / n0 if n0 > 0 else 0.6
+    p_inactive_after_active = trans[(1, 0)] / n1 if n1 > 0 else 0.25
+
+    streak_state = series[-1]
+    streak_len = 1
+    for v in reversed(series[:-1]):
+        if v == streak_state:
+            streak_len += 1
+        else:
+            break
+
+    return {
+        'p_inactive_after_inactive': p_inactive_after_inactive,
+        'p_inactive_after_active': p_inactive_after_active,
+        'p_active_after_inactive': 1 - p_inactive_after_inactive,
+        'p_active_after_active': 1 - p_inactive_after_active,
+        'today_state': series[-1],
+        'streak_state': streak_state,
+        'streak_len': streak_len,
+        'series': series,
+        'dates': [(start + timedelta(days=i)).isoformat() for i in range(len(series))],
+        'sample_size': n0 + n1,
+    }
+
+
+def _project_velocity_samples(pid, fallback_minutes=30):
+    """Minuten erledigte Projektarbeit pro Tag, an dem an diesem Projekt etwas erledigt wurde."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT completed_at, estimate_minutes FROM project_tasks "
+        "WHERE project_id=? AND done=1 AND completed_at IS NOT NULL", (pid,)
+    ).fetchall()
+    conn.close()
+    by_day = {}
+    for completed_at, est in rows:
+        if not completed_at:
+            continue
+        d = completed_at[:10]
+        by_day[d] = by_day.get(d, 0) + (est or fallback_minutes)
+    samples = list(by_day.values())
+    return samples if samples else [fallback_minutes]
+
+
+def _simulate_project_completion(remaining_mins, days_left, markov, velocity_samples,
+                                   force_today_state=None, n_sims=3000):
+    """Monte-Carlo-Simulation: wie wahrscheinlich ist es, das Restpensum bis zur Deadline
+    zu schaffen, basierend auf der empirischen Markov-Kette für Aktiv/Inaktiv-Tage und
+    der tatsächlichen Velocity-Verteilung dieses Projekts (Bootstrap)."""
+    if remaining_mins <= 0:
+        return 1.0
+    if days_left is None or days_left < 0:
+        return 0.0
+
+    successes = 0
+    for _ in range(n_sims):
+        acc = 0
+        state = force_today_state if force_today_state is not None else markov['today_state']
+        for day in range(days_left + 1):
+            if day > 0:
+                p_inactive = (markov['p_inactive_after_active'] if state == 1
+                              else markov['p_inactive_after_inactive'])
+                state = 0 if random.random() < p_inactive else 1
+            if state == 1:
+                acc += random.choice(velocity_samples)
+            if acc >= remaining_mins:
+                successes += 1
+                break
+    return successes / n_sims
+
+
+def _build_forecast_gauge(pct, label, sublabel):
+    """Kompakter SVG-Ring (ähnlich Tagesfokus-Hero) für die Erfolgswahrscheinlichkeit."""
+    pct = max(0, min(100, pct))
+    if pct < 35:
+        col, glow = "#e74c3c", "rgba(231,76,60,0.45)"
+    elif pct < 65:
+        col, glow = "#f39c12", "rgba(243,156,18,0.45)"
+    else:
+        col, glow = "#2ecc71", "rgba(46,204,113,0.45)"
+    r = 70
+    circumference = 2 * math.pi * r
+    offset = circumference * (1 - pct / 100)
+    return f"""<!DOCTYPE html>
+<html><head><style>
+  html,body{{margin:0;padding:0;background:#0e1117;overflow:hidden;
+             font-family:system-ui,-apple-system,sans-serif}}
+  .wrap{{display:flex;align-items:center;justify-content:center;height:190px}}
+  svg{{transform:rotate(-90deg)}}
+  .ring-bg{{fill:none;stroke:rgba(255,255,255,0.08);stroke-width:12}}
+  .ring-fg{{fill:none;stroke:{col};stroke-width:12;stroke-linecap:round;
+            stroke-dasharray:{circumference:.2f};
+            stroke-dashoffset:{circumference:.2f};
+            filter:drop-shadow(0 0 8px {glow});
+            animation:fillin 1.4s cubic-bezier(.22,.9,.34,1) forwards}}
+  @keyframes fillin{{to{{stroke-dashoffset:{offset:.2f}}}}}
+  .center{{position:absolute;text-align:center}}
+  .pctnum{{font-size:34px;font-weight:900;color:{col}}}
+  .lbl{{font-size:10px;color:rgba(255,255,255,0.45);letter-spacing:1px;margin-top:2px}}
+  .sub{{font-size:9px;color:rgba(255,255,255,0.3);margin-top:6px}}
+</style></head><body>
+<div class="wrap" style="position:relative">
+  <svg width="170" height="170" viewBox="0 0 170 170">
+    <circle class="ring-bg" cx="85" cy="85" r="{r}"/>
+    <circle class="ring-fg" cx="85" cy="85" r="{r}"/>
+  </svg>
+  <div class="center">
+    <div class="pctnum">{pct}%</div>
+    <div class="lbl">{label}</div>
+    <div class="sub">{sublabel}</div>
+  </div>
+</div>
+</body></html>"""
+
+
+def _render_project_forecast(pid, tasks, deadline, daily_minutes):
+    undone = [t for t in tasks if not t[5]]
+    remaining_mins = sum(t[3] or 0 for t in undone)
+
+    if not remaining_mins:
+        st.success("✅ Alle Aufgaben erledigt — keine Prognose nötig.")
+        return
+    if not deadline:
+        st.info("📅 Setze eine Deadline in den Projekteinstellungen, um eine Prognose zu sehen.")
+        return
+
+    today = date.today()
+    try:
+        days_left = (date.fromisoformat(deadline) - today).days
+    except Exception:
+        st.info("Ungültige Deadline.")
+        return
+
+    markov = _activity_markov_chain()
+    if markov is None or markov['sample_size'] < 5:
+        st.info("📈 Noch nicht genug Verlaufsdaten für eine zuverlässige Prognose — "
+                "sammle ein paar Tage Aktivität, dann rechnet Kaizen mit echten Mustern statt Annahmen.")
+        return
+
+    velocity_samples = _project_velocity_samples(pid, fallback_minutes=daily_minutes or 30)
+
+    p_baseline = _simulate_project_completion(remaining_mins, days_left, markov, velocity_samples)
+    p_continue = _simulate_project_completion(remaining_mins, days_left, markov, velocity_samples,
+                                                force_today_state=1)
+    p_skip = _simulate_project_completion(remaining_mins, days_left, markov, velocity_samples,
+                                            force_today_state=0)
+
+    st.markdown("##### 🔮 Erfolgswahrscheinlichkeit")
+    gc1, gc2 = st.columns([1, 1.4])
+    with gc1:
+        pct = int(round(p_baseline * 100))
+        sub = f"{remaining_mins} min offen · {days_left} Tage" if days_left >= 0 else "Deadline überschritten"
+        components.html(_build_forecast_gauge(pct, "bei aktuellem Tempo", sub), height=190, scrolling=False)
+
+    with gc2:
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+        delta_pp = (p_continue - p_skip) * 100
+        st.markdown(f"""
+<div style="display:flex;gap:10px">
+  <div style="flex:1;background:rgba(46,204,113,0.08);border:1px solid rgba(46,204,113,0.25);
+              border-radius:12px;padding:12px 14px">
+    <div style="font-size:9px;color:#2ecc71;letter-spacing:1.5px;text-transform:uppercase">
+      🔥 Pfad: Heute aktiv</div>
+    <div style="font-size:26px;font-weight:900;color:#2ecc71;margin-top:4px">
+      {int(round(p_continue*100))}%</div>
+    <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px">
+      Erfolgschance wenn du heute etwas schaffst</div>
+  </div>
+  <div style="flex:1;background:rgba(231,76,60,0.08);border:1px solid rgba(231,76,60,0.25);
+              border-radius:12px;padding:12px 14px">
+    <div style="font-size:9px;color:#e74c3c;letter-spacing:1.5px;text-transform:uppercase">
+      🧊 Pfad: Heute aussetzen</div>
+    <div style="font-size:26px;font-weight:900;color:#e74c3c;margin-top:4px">
+      {int(round(p_skip*100))}%</div>
+    <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px">
+      Erfolgschance wenn heute 0 Aufgaben passieren</div>
+  </div>
+</div>
+<div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,0.5)">
+  Differenz: <strong style="color:#00d4ff">{delta_pp:.0f} Prozentpunkte</strong> —
+  so viel kostet dich ein Nulltag bei diesem Projekt, statistisch gesehen.</div>
+""", unsafe_allow_html=True)
+
+    # ── Spiral-Risk ──────────────────────────────────────────
+    p_spiral = markov['p_inactive_after_inactive'] * 100
+    p_bounce = markov['p_inactive_after_active'] * 100
+    streak_txt = ("noch keine Aufgabe heute" if markov['today_state'] == 0
+                  else "heute schon aktiv")
+    spiral_col = "#e74c3c" if p_spiral >= 55 else "#f39c12" if p_spiral >= 35 else "#2ecc71"
+    if markov['streak_state'] == 0 and markov['streak_len'] >= 2:
+        spiral_note = (f"⚠️ Du bist seit <strong>{markov['streak_len']} Tagen</strong> inaktiv. "
+                        f"Historisch bleibst du nach einem inaktiven Tag zu <strong>{p_spiral:.0f}%</strong> "
+                        f"auch am nächsten Tag inaktiv — das ist dein Prokrastinations-Muster, "
+                        f"keine Vermutung, sondern aus deinen eigenen Daten berechnet.")
+    else:
+        spiral_note = (f"Nach einem inaktiven Tag bist du historisch zu <strong>{p_spiral:.0f}%</strong> "
+                        f"auch am Folgetag inaktiv — nach einem aktiven Tag nur zu "
+                        f"<strong>{p_bounce:.0f}%</strong>. Aktiv bleiben senkt dein Rückfallrisiko "
+                        f"um <strong>{p_spiral - p_bounce:.0f} Prozentpunkte</strong>.")
+    st.markdown(f"""
+<div style="background:rgba(255,255,255,0.04);border-left:3px solid {spiral_col};
+            border-radius:0 10px 10px 0;padding:12px 16px;margin-top:14px;font-size:12px;
+            color:rgba(255,255,255,0.75);line-height:1.6">
+  {spiral_note}
+</div>""", unsafe_allow_html=True)
+
+    # ── Aktivitäts-Kalender (GitHub-Style Heatmap) ────────────
+    series = markov['series'][-84:]
+    dates_s = markov['dates'][-84:]
+    n_cols = math.ceil(len(series) / 7)
+    cells = ""
+    for col in range(n_cols):
+        for row in range(7):
+            idx = col * 7 + row
+            if idx >= len(series):
+                continue
+            active = series[idx]
+            d_obj = date.fromisoformat(dates_s[idx])
+            is_today = d_obj == today
+            bg = "#2ecc71" if active else "rgba(255,255,255,0.08)"
+            border = "2px solid #00d4ff" if is_today else "1px solid rgba(255,255,255,0.04)"
+            cells += (f'<div title="{dates_s[idx]}: {"aktiv" if active else "inaktiv"}" '
+                      f'style="width:11px;height:11px;border-radius:3px;background:{bg};'
+                      f'border:{border};grid-column:{col+1};grid-row:{row+1}"></div>')
+    st.markdown(f"""
+<div style="margin-top:16px">
+  <div style="font-size:9px;color:rgba(255,255,255,0.35);letter-spacing:1.5px;
+              text-transform:uppercase;margin-bottom:8px">📅 Aktivitätsmuster (letzte {len(series)} Tage)</div>
+  <div style="display:grid;grid-template-columns:repeat({n_cols},11px);grid-template-rows:repeat(7,11px);
+              gap:3px;overflow-x:auto;padding-bottom:4px">
+    {cells}
+  </div>
+  <div style="font-size:9px;color:rgba(255,255,255,0.25);margin-top:6px">
+    🟩 aktiver Tag · ⬜ inaktiver Tag · 🔵 Rand = heute
+  </div>
+</div>""", unsafe_allow_html=True)
+
+
 def _render_project_detail(project_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
@@ -4861,12 +5136,12 @@ def _render_project_detail(project_id):
         st.markdown("---")
         st.subheader("📊 Zeitplan & Fortschritt")
 
-        tab1, tab2 = st.tabs(["Gantt-Zeitplan", "Burndown"])
+        tab1, tab2, tab3 = st.tabs(["Gantt-Zeitplan", "Burndown", "🔮 Prognose"])
 
         with tab1:
             gantt_data = []
             for t in tasks:
-                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, _ = t
+                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, _, _, _ = t
                 if scheduled_date:
                     try:
                         start_dt = datetime.combine(date.fromisoformat(scheduled_date),
@@ -4922,6 +5197,9 @@ def _render_project_detail(project_id):
                     st.plotly_chart(fig_b, use_container_width=True)
             else:
                 st.info("Erledige Aufgaben um den Fortschritt zu sehen.")
+
+        with tab3:
+            _render_project_forecast(pid, tasks, deadline, daily_minutes)
 
 
 def render_routinen_page():
