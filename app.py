@@ -34,6 +34,76 @@ CLASS_INFO = {
 RARITY_COLORS = {'common':'#636e72','rare':'#00d4ff','epic':'#9b59b6','legendary':'#ffd700'}
 RARITY_LABELS = {'common':'Gewöhnlich','rare':'Selten','epic':'Episch','legendary':'Legendär'}
 
+# ─── Calisthenics Trainingssystem: Tracks & Progressionsstufen ────
+CAL_TRACKS = {
+    'push': {
+        'label': 'Push', 'full_label': 'Push (Brust / Trizeps / Schulter)', 'icon': '💪', 'color': '#e74c3c',
+        'levels': [
+            {'name': 'Wand-Liegestütz',              'sets': 3, 'reps': 15, 'hold': False, 'cue': 'Hände schulterbreit an der Wand, Körper bildet eine gerade Linie.'},
+            {'name': 'Knie-Liegestütz',               'sets': 3, 'reps': 12, 'hold': False, 'cue': 'Knie statt Füße als Stützpunkt, Rumpf bleibt fest.'},
+            {'name': 'Liegestütz',                    'sets': 3, 'reps': 10, 'hold': False, 'cue': 'Volle Range of Motion, Brust fast bis zum Boden.'},
+            {'name': 'Enge Liegestütz (Diamond)',     'sets': 3, 'reps': 8,  'hold': False, 'cue': 'Hände bilden ein Dreieck unter der Brust.'},
+            {'name': 'Archer Liegestütz',             'sets': 3, 'reps': 6,  'hold': False, 'cue': 'Ein Arm gestreckt zur Seite, Gewicht auf dem anderen.'},
+            {'name': 'Pseudo Planche Liegestütz',     'sets': 3, 'reps': 8,  'hold': False, 'cue': 'Hände auf Hüfthöhe, Schultern weit vor die Hände schieben.'},
+            {'name': 'One-Arm Liegestütz (assistiert)','sets': 3, 'reps': 5, 'hold': False, 'cue': 'Andere Hand nur leicht zur Balance aufsetzen.'},
+        ]
+    },
+    'pull': {
+        'label': 'Pull', 'full_label': 'Pull (Rücken / Bizeps)', 'icon': '🪢', 'color': '#3498db',
+        'levels': [
+            {'name': 'Dead Hang',                     'sets': 3, 'reps': 20, 'hold': True,  'cue': 'Locker an der Stange hängen, Schultern aktiv nach unten ziehen.'},
+            {'name': 'Negativer Klimmzug',             'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Oben starten, so langsam wie möglich (5s) herunterlassen.'},
+            {'name': 'Band-Klimmzug',                  'sets': 3, 'reps': 8,  'hold': False, 'cue': 'Resistance Band unter den Knien zur Unterstützung.'},
+            {'name': 'Klimmzug',                       'sets': 3, 'reps': 6,  'hold': False, 'cue': 'Kinn über die Stange, volle Streckung unten.'},
+            {'name': 'Enger Klimmzug (Chin-up)',       'sets': 3, 'reps': 8,  'hold': False, 'cue': 'Untergriff, eng, mehr Bizeps-Fokus.'},
+            {'name': 'Archer Klimmzug',                'sets': 3, 'reps': 4,  'hold': False, 'cue': 'Ein Arm zieht aktiv, der andere bleibt fast gestreckt.'},
+            {'name': 'One-Arm Klimmzug (assistiert)',  'sets': 3, 'reps': 3,  'hold': False, 'cue': 'Mit Band oder freier Hand am Handgelenk unterstützen.'},
+        ]
+    },
+    'legs': {
+        'label': 'Legs', 'full_label': 'Legs (Beine / Gesäß)', 'icon': '🦵', 'color': '#f39c12',
+        'levels': [
+            {'name': 'Kniebeuge',                     'sets': 3, 'reps': 15, 'hold': False, 'cue': 'Hüftbreit, Knie in Zehenrichtung, tief runter.'},
+            {'name': 'Split Squat',                   'sets': 3, 'reps': 10, 'hold': False, 'cue': 'Ausfallschritt-Position, pro Bein zählen.'},
+            {'name': 'Bulgarian Split Squat',         'sets': 3, 'reps': 10, 'hold': False, 'cue': 'Hinterer Fuß erhöht auf Stuhl oder Bank.'},
+            {'name': 'Shrimp Squat (assistiert)',     'sets': 3, 'reps': 6,  'hold': False, 'cue': 'Hinteres Bein gebeugt halten, leicht abstützen.'},
+            {'name': 'Pistol Squat (assistiert)',     'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Mit Festhalten an Tür oder Geländer für Balance.'},
+            {'name': 'Pistol Squat (frei)',           'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Komplett frei, ein Bein gestreckt nach vorne.'},
+        ]
+    },
+    'core': {
+        'label': 'Core', 'full_label': 'Core (Rumpf)', 'icon': '🔥', 'color': '#9b59b6',
+        'levels': [
+            {'name': 'Plank',                         'sets': 3, 'reps': 40, 'hold': True,  'cue': 'Gerade Linie von Kopf bis Ferse, Bauch fest.'},
+            {'name': 'Hollow Body Hold',               'sets': 3, 'reps': 25, 'hold': True,  'cue': 'Unterer Rücken fest am Boden, Arme/Beine leicht angehoben.'},
+            {'name': 'Liegende Beinheber',             'sets': 3, 'reps': 12, 'hold': False, 'cue': 'Beine gestreckt heben, Rücken bleibt am Boden.'},
+            {'name': 'Hängende Knieheber',             'sets': 3, 'reps': 10, 'hold': False, 'cue': 'An der Stange hängend, Knie zur Brust ziehen.'},
+            {'name': 'Hängende Beinheber',             'sets': 3, 'reps': 10, 'hold': False, 'cue': 'Gestreckte Beine bis zur Waagerechten heben.'},
+            {'name': 'Dragon Flag (negativ)',          'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Oben starten, so kontrolliert wie möglich ablassen.'},
+        ]
+    },
+    'skill_handstand': {
+        'label': 'Handstand', 'full_label': 'Skill: Handstand', 'icon': '🤸', 'color': '#2ecc71',
+        'levels': [
+            {'name': 'Wand-Handstand (Bauch zur Wand)', 'sets': 3, 'reps': 20, 'hold': True, 'cue': 'Hände schulterbreit, in die Wand hineinlaufen.'},
+            {'name': 'Wand-Handstand (Rücken zur Wand)','sets': 3, 'reps': 30, 'hold': True, 'cue': 'Schwieriger: Rücken zur Wand, Hüfte voll gestreckt.'},
+            {'name': 'Wall Walk',                       'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Aus der Plank rückwärts an der Wand hochlaufen.'},
+            {'name': 'Freier Handstand-Versuch',        'sets': 3, 'reps': 10, 'hold': False, 'cue': 'Kick-up-Versuche in der Raummitte zählen.'},
+            {'name': 'Freier Handstand Hold',           'sets': 3, 'reps': 10, 'hold': True,  'cue': 'Freistehend balancieren, Sekunden zählen.'},
+        ]
+    },
+    'skill_muscleup': {
+        'label': 'Muscle-up', 'full_label': 'Skill: Muscle-up', 'icon': '🚀', 'color': '#ffd700',
+        'levels': [
+            {'name': 'Explosive Klimmzüge',            'sets': 3, 'reps': 5,  'hold': False, 'cue': 'So hoch wie möglich ziehen, Brust Richtung Stange.'},
+            {'name': 'Dips',                           'sets': 3, 'reps': 8,  'hold': False, 'cue': 'An Stange/Barren, Ellbogen eng, tief runter.'},
+            {'name': 'Band-Muscle-up',                  'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Mit Band unterstützt den Übergang üben.'},
+            {'name': 'Negativer Muscle-up',             'sets': 3, 'reps': 5,  'hold': False, 'cue': 'Oben starten, langsam durch den Übergang absenken.'},
+            {'name': 'Muscle-up',                       'sets': 3, 'reps': 3,  'hold': False, 'cue': 'Voller Übergang von Klimmzug zu Dip, sauber.'},
+        ]
+    },
+}
+
 # ─── Season exclusive item keys (not shown in regular shop) ──────
 SEASON_EXCLUSIVE_KEYS = {
     's1_aura_ocean','s1_aura_star','s1_aura_dawn','s1_aura_cosmic','s1_aura_rift',
@@ -539,6 +609,34 @@ def init_db():
         time_estimate INTEGER DEFAULT 0,
         context_note TEXT,
         analyzed_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    # ─── Calisthenics Trainingssystem ──────────────────────────
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS cal_progress (
+        track TEXT PRIMARY KEY,
+        current_level INTEGER DEFAULT 0,
+        consecutive_clean INTEGER DEFAULT 0,
+        bonus_reps INTEGER DEFAULT 0,
+        best_reps INTEGER DEFAULT 0,
+        updated_at TEXT
+    )
+    ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS cal_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_date TEXT NOT NULL,
+        track TEXT NOT NULL,
+        exercise_name TEXT,
+        level_idx INTEGER,
+        sets_completed INTEGER,
+        target_sets INTEGER,
+        best_reps INTEGER,
+        target_reps INTEGER,
+        is_hold INTEGER DEFAULT 0,
+        clean INTEGER DEFAULT 0,
+        notes TEXT,
+        created_at TEXT
     )
     ''')
     conn.commit()
@@ -1571,6 +1669,156 @@ def sync_project_tasks():
     conn.close()
 
 
+# ========== CALISTHENICS TRAININGSSYSTEM ==========
+
+def get_cal_progress():
+    """Fortschritt je Track: {track: {level, consecutive_clean, bonus, best_reps}}."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT track, current_level, consecutive_clean, bonus_reps, best_reps FROM cal_progress").fetchall()
+    conn.close()
+    prog = {t: {'level': 0, 'consecutive_clean': 0, 'bonus': 0, 'best_reps': 0} for t in CAL_TRACKS}
+    for track, lvl, cc, bonus, best in rows:
+        if track in prog:
+            prog[track] = {'level': lvl, 'consecutive_clean': cc, 'bonus': bonus, 'best_reps': best}
+    return prog
+
+
+def get_cal_exercise(track, level_idx=None, bonus=0):
+    """Liefert die aktuelle Übung eines Tracks inkl. (ggf. unendlich wachsendem) Zielwert."""
+    levels = CAL_TRACKS[track]['levels']
+    if level_idx is None:
+        level_idx = 0
+    level_idx = max(0, min(level_idx, len(levels) - 1))
+    base = levels[level_idx]
+    is_max = level_idx == len(levels) - 1
+    target_reps = base['reps'] + (bonus if is_max else 0)
+    return {**base, 'target_reps': target_reps, 'level_idx': level_idx, 'is_max_level': is_max,
+            'level_count': len(levels)}
+
+
+def todays_skill_track():
+    wd = date.today().weekday()  # 0=Montag
+    return 'skill_handstand' if wd in (0, 2, 4, 6) else 'skill_muscleup'
+
+
+def todays_cal_tracks():
+    return ['push', 'pull', 'legs', 'core', todays_skill_track()]
+
+
+def log_cal_session(track, sets_completed, best_reps, notes=''):
+    """Loggt eine Trainingseinheit, erkennt Fortschritt und steigert das Level bei Bedarf."""
+    prog_all = get_cal_progress()
+    prog = prog_all[track]
+    ex = get_cal_exercise(track, prog['level'], prog['bonus'])
+    today_str = date.today().isoformat()
+    now = datetime.utcnow().isoformat()
+
+    clean = sets_completed >= ex['sets'] and best_reps >= ex['target_reps']
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute('''INSERT INTO cal_sessions
+                 (session_date, track, exercise_name, level_idx, sets_completed, target_sets,
+                  best_reps, target_reps, is_hold, clean, notes, created_at)
+                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
+              (today_str, track, ex['name'], ex['level_idx'], sets_completed, ex['sets'],
+               best_reps, ex['target_reps'], int(ex['hold']), int(clean), notes, now))
+
+    new_cc = prog['consecutive_clean'] + 1 if clean else 0
+    new_level = prog['level']
+    new_bonus = prog['bonus']
+    new_best = max(prog['best_reps'], best_reps)
+    leveled_up = False
+    new_level_name = None
+
+    if new_cc >= 2:
+        new_cc = 0
+        if ex['is_max_level']:
+            new_bonus += 2 if ex['hold'] else 1
+        else:
+            new_level += 1
+            new_best = 0
+        leveled_up = True
+        next_ex = get_cal_exercise(track, new_level, new_bonus)
+        new_level_name = next_ex['name']
+
+    c.execute('''INSERT INTO cal_progress (track, current_level, consecutive_clean, bonus_reps, best_reps, updated_at)
+                 VALUES (?,?,?,?,?,?)
+                 ON CONFLICT(track) DO UPDATE SET
+                   current_level=excluded.current_level,
+                   consecutive_clean=excluded.consecutive_clean,
+                   bonus_reps=excluded.bonus_reps,
+                   best_reps=excluded.best_reps,
+                   updated_at=excluded.updated_at''',
+              (track, new_level, new_cc, new_bonus, new_best, now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+    return {'clean': clean, 'leveled_up': leveled_up, 'new_level_name': new_level_name, 'exercise': ex}
+
+
+def get_cal_streak():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT DISTINCT session_date FROM cal_sessions ORDER BY session_date").fetchall()
+    conn.close()
+    date_set = {r[0] for r in rows}
+    if not date_set:
+        return {'current': 0, 'longest': 0, 'trained_today': False, 'dates': date_set, 'total_sessions': 0}
+
+    today = date.today()
+    trained_today = today.isoformat() in date_set
+    cur = 0
+    d = today if trained_today else today - timedelta(days=1)
+    while d.isoformat() in date_set:
+        cur += 1
+        d -= timedelta(days=1)
+
+    sorted_dates = sorted(date.fromisoformat(x) for x in date_set)
+    longest = 1
+    run = 1
+    for i in range(1, len(sorted_dates)):
+        if (sorted_dates[i] - sorted_dates[i - 1]).days == 1:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    longest = max(longest, cur)
+
+    conn = sqlite3.connect(DB_PATH)
+    total_sessions = conn.execute("SELECT COUNT(*) FROM cal_sessions").fetchone()[0]
+    conn.close()
+
+    return {'current': cur, 'longest': longest, 'trained_today': trained_today,
+            'dates': date_set, 'total_sessions': total_sessions}
+
+
+def sync_daily_training():
+    """Erstellt das heutige Trainings-Highlight im Kalender (einmal pro Tag, idempotent)."""
+    today_str = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM entries WHERE entry_date=? AND tags LIKE '%training%'", (today_str,))
+    if c.fetchone()[0] == 0:
+        tracks = todays_cal_tracks()
+        names = [CAL_TRACKS[t]['label'] for t in tracks]
+        content = "🏋️ Calisthenics: " + ", ".join(names)
+        now = datetime.utcnow().isoformat()
+        c.execute('''INSERT INTO entries (entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, last_modified)
+                     VALUES (?,?,?,?,?,?,?,?,?)''',
+                  ('highlight', content, 'training', 9, 20, 0, now, today_str, now))
+        conn.commit()
+    conn.close()
+
+
+def get_todays_training_entry_id():
+    today_str = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT id, done FROM entries WHERE entry_date=? AND tags LIKE '%training%' ORDER BY id DESC LIMIT 1",
+                        (today_str,)).fetchone()
+    conn.close()
+    return row if row else (None, 0)
+
+
 # ========== RECURRING TASKS ==========
 
 DAY_ABBR = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -2284,6 +2532,81 @@ JSON-Format:
 }}"""
             }],
             max_tokens=800,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ki_training_coach(api_key):
+    """Echter Trainingscoach: analysiert die Calisthenics-Session-Historie und gibt Feedback/Tipps."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+        today = date.today()
+        conn = sqlite3.connect(DB_PATH)
+        sessions = conn.execute(
+            "SELECT session_date, track, exercise_name, sets_completed, target_sets, "
+            "best_reps, target_reps, is_hold, clean FROM cal_sessions "
+            "WHERE session_date >= date(?, '-14 days') ORDER BY session_date", (today.isoformat(),)
+        ).fetchall()
+        conn.close()
+
+        prog = get_cal_progress()
+        streak = get_cal_streak()
+
+        if not sessions:
+            return {"error": "no_data"}
+
+        sess_str = "\n".join(
+            f'- {r[0]} [{CAL_TRACKS.get(r[1], {}).get("label", r[1])}] "{r[2]}": '
+            f'{r[3]}/{r[4]} Sätze, beste Leistung {r[5]}/{r[6]}{"s" if r[7] else " Wdh"} '
+            f'{"✅ sauber" if r[8] else "⚠️ nicht ganz geschafft"}'
+            for r in sessions
+        )
+        prog_str = "\n".join(
+            f'- {CAL_TRACKS[t]["label"]}: Stufe {p["level"]+1}/{len(CAL_TRACKS[t]["levels"])} '
+            f'({get_cal_exercise(t, p["level"], p["bonus"])["name"]})'
+            for t, p in prog.items()
+        )
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    f"Du bist ein erfahrener Calisthenics-Trainingscoach für einen ADHS-Athleten. "
+                    f"Heute ist {today.isoformat()}. Analysiere echte Trainingsdaten der letzten 14 Tage "
+                    "und erkenne Muster (Konsistenz, Stagnation, Übertraining, welcher Track hinterherhinkt). "
+                    "Sei konkret, kurz und motivierend, kein Geschwafel. Antworte ausschließlich mit validem JSON."
+                )
+            }, {
+                "role": "user",
+                "content": f"""AKTUELLER FORTSCHRITT JE TRACK:\n{prog_str}
+
+STREAK: aktuell {streak['current']} Tage, längste Serie {streak['longest']} Tage, insgesamt {streak['total_sessions']} Einheiten geloggt.
+
+TRAININGSHISTORIE (letzte 14 Tage):
+{sess_str}
+
+JSON-Format:
+{{
+  "headline": "Kurzer Coach-Satz zur aktuellen Lage (1 Satz)",
+  "pattern_detected": "Konkret erkanntes Muster aus den Daten (z.B. welcher Track stagniert, welcher boomt)",
+  "weak_track": "Track-Key (push/pull/legs/core/skill_handstand/skill_muscleup) der am meisten Aufmerksamkeit braucht, oder null",
+  "strong_track": "Track-Key mit dem besten Fortschritt, oder null",
+  "next_focus": "1 konkrete Handlungsempfehlung für die nächste Einheit",
+  "motivation": "1 kurzer, ehrlicher Motivationssatz passend zur Datenlage"
+}}"""
+            }],
+            max_tokens=700,
             stream=False
         )
         raw = resp.choices[0].message.content.strip()
@@ -6136,6 +6459,253 @@ def render_statistics_page():
                     f'{total_h} Stunden</div>', unsafe_allow_html=True)
 
 
+# ========== CALISTHENICS TRAININGSSEITE ==========
+
+def _cal_heatmap_html(days=84):
+    today_d = date.today()
+    streak = get_cal_streak()
+    date_set = streak['dates']
+
+    def cell_color(active):
+        return "#00ff88" if active else "rgba(255,255,255,0.05)"
+
+    cells = ""
+    for i in range(days - 1, -1, -1):
+        d = today_d - timedelta(days=i)
+        active = d.isoformat() in date_set
+        tip = f"{d.strftime('%d.%m')}: {'trainiert' if active else 'Pause'}"
+        cells += f'<div title="{tip}" style="width:14px;height:14px;background:{cell_color(active)};border-radius:2px;flex-shrink:0"></div>'
+
+    return f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 16px;
+  border:1px solid rgba(255,255,255,0.07);margin-bottom:10px">
+  <div style="display:flex;flex-wrap:wrap;gap:3px;width:calc(14*(14px + 3px))">
+    {cells}
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-top:8px;font-size:10px;color:rgba(255,255,255,0.3)">
+    <div style="width:10px;height:10px;background:rgba(255,255,255,0.05);border-radius:2px"></div>
+    <span>Pause</span>
+    <div style="width:10px;height:10px;background:#00ff88;border-radius:2px;margin-left:8px"></div>
+    <span>trainiert</span>
+  </div>
+</div>"""
+
+
+def _cal_track_ladder_html(track):
+    info = CAL_TRACKS[track]
+    levels = info['levels']
+    prog = get_cal_progress()[track]
+    cur_idx = prog['level']
+
+    steps = ""
+    for i, lvl in enumerate(levels):
+        if i < cur_idx:
+            bg, col, icon = info['color'], "#fff", "✓"
+        elif i == cur_idx:
+            bg, col, icon = info['color'], "#fff", str(i + 1)
+        else:
+            bg, col, icon = "rgba(255,255,255,0.05)", "rgba(255,255,255,0.3)", str(i + 1)
+        glow = f"box-shadow:0 0 12px {info['color']}99;" if i == cur_idx else ""
+        opacity = "opacity:1" if i <= cur_idx else "opacity:0.5"
+        steps += f"""
+  <div style="display:flex;align-items:center;gap:10px;{opacity};margin-bottom:6px">
+    <div style="width:26px;height:26px;border-radius:50%;background:{bg};color:{col};
+                display:flex;align-items:center;justify-content:center;font-size:11px;
+                font-weight:800;flex-shrink:0;{glow}">{icon}</div>
+    <div style="font-size:12.5px;color:{'white' if i <= cur_idx else 'rgba(255,255,255,0.4)'};
+                font-weight:{'700' if i == cur_idx else '400'}">{lvl['name']}</div>
+  </div>"""
+
+    is_max = cur_idx == len(levels) - 1
+    bonus_note = ""
+    if is_max and prog['bonus'] > 0:
+        ex = get_cal_exercise(track, cur_idx, prog['bonus'])
+        bonus_note = f"""<div style="margin-top:6px;font-size:11px;color:{info['color']};font-weight:700">
+            ♾️ Unendlich-Modus: Ziel bereits auf {ex['target_reps']}{'s' if ex['hold'] else ' Wdh'} gesteigert</div>"""
+
+    return f"""<div style="background:rgba(255,255,255,0.03);border-radius:14px;padding:16px 18px;
+  border:1px solid {info['color']}33;height:100%">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <span style="font-size:20px">{info['icon']}</span>
+    <span style="font-weight:800;color:white;font-size:13.5px">{info['full_label']}</span>
+  </div>
+  {steps}
+  {bonus_note}
+</div>"""
+
+
+def render_training_page():
+    st.title("🏋️ Training")
+    st.caption("Calisthenics — jeden Tag ein Level weiter. Komplett zuhause, ohne Geräte.")
+
+    sync_daily_training()
+    streak = get_cal_streak()
+    today_tracks = todays_cal_tracks()
+    prog = get_cal_progress()
+
+    # ── Hero: Streak ──────────────────────────────────────────
+    flame = "🔥" if streak['current'] > 0 else "💤"
+    trained_badge = ('<span style="background:rgba(46,204,113,0.18);color:#2ecc71;font-size:11px;'
+                      'font-weight:700;padding:4px 12px;border-radius:20px;border:1px solid rgba(46,204,113,0.4)">'
+                      '✅ Heute trainiert</span>') if streak['trained_today'] else \
+                     ('<span style="background:rgba(243,156,18,0.18);color:#f39c12;font-size:11px;'
+                      'font-weight:700;padding:4px 12px;border-radius:20px;border:1px solid rgba(243,156,18,0.4)">'
+                      '⏳ Heute noch offen</span>')
+
+    h1, h2, h3, h4 = st.columns(4)
+    with h1:
+        st.markdown(f"""<div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:14px;
+            padding:16px;border:1px solid rgba(255,255,255,0.08)">
+            <div style="font-size:32px">{flame}</div>
+            <div style="font-size:26px;font-weight:900;color:#ff9500">{streak['current']}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:1px">TAGE STREAK</div>
+        </div>""", unsafe_allow_html=True)
+    with h2:
+        st.markdown(f"""<div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:14px;
+            padding:16px;border:1px solid rgba(255,255,255,0.08)">
+            <div style="font-size:32px">🏆</div>
+            <div style="font-size:26px;font-weight:900;color:#ffd700">{streak['longest']}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:1px">REKORD-STREAK</div>
+        </div>""", unsafe_allow_html=True)
+    with h3:
+        st.markdown(f"""<div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:14px;
+            padding:16px;border:1px solid rgba(255,255,255,0.08)">
+            <div style="font-size:32px">📋</div>
+            <div style="font-size:26px;font-weight:900;color:#00d4ff">{streak['total_sessions']}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);letter-spacing:1px">EINHEITEN GESAMT</div>
+        </div>""", unsafe_allow_html=True)
+    with h4:
+        st.markdown(f"""<div style="text-align:center;background:rgba(255,255,255,0.03);border-radius:14px;
+            padding:16px;border:1px solid rgba(255,255,255,0.08);display:flex;flex-direction:column;
+            justify-content:center;align-items:center">
+            <div style="margin-bottom:6px">{trained_badge}</div>
+        </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Heutiges Training ───────────────────────────────────────
+    st.markdown("### 💪 Heutiges Training")
+    entry_id, entry_done = get_todays_training_entry_id()
+
+    if streak['trained_today']:
+        st.success("Heute bereits geloggt — stark! Du kannst unten trotzdem nachtragen/korrigieren.")
+
+    with st.form("cal_log_form"):
+        inputs = {}
+        for track in today_tracks:
+            info = CAL_TRACKS[track]
+            p = prog[track]
+            ex = get_cal_exercise(track, p['level'], p['bonus'])
+            unit = "Sekunden" if ex['hold'] else "Wiederholungen"
+
+            st.markdown(f"""<div style="display:flex;align-items:center;gap:10px;margin:14px 0 4px 0">
+                <span style="font-size:20px">{info['icon']}</span>
+                <span style="font-weight:800;color:white;font-size:14px">{ex['name']}</span>
+                <span style="font-size:10px;color:{info['color']};background:{info['color']}22;
+                    padding:2px 8px;border-radius:10px;border:1px solid {info['color']}55">
+                    Stufe {ex['level_idx']+1}/{ex['level_count']}</span>
+            </div>
+            <div style="font-size:11.5px;color:rgba(255,255,255,0.45);margin-bottom:6px">
+                {ex['cue']} · Ziel: {ex['sets']} Sätze × {ex['target_reps']} {unit}</div>""",
+                        unsafe_allow_html=True)
+
+            ic1, ic2 = st.columns(2)
+            with ic1:
+                inputs[track] = {}
+                inputs[track]['sets'] = st.number_input(
+                    f"Sätze geschafft", min_value=0, max_value=ex['sets'] + 2, value=ex['sets'],
+                    key=f"cal_sets_{track}")
+            with ic2:
+                inputs[track]['best'] = st.number_input(
+                    f"Beste Leistung ({unit})", min_value=0, max_value=ex['target_reps'] * 3 + 10,
+                    value=ex['target_reps'], key=f"cal_best_{track}")
+
+        notes = st.text_input("Notiz (optional)", key="cal_notes", placeholder="z.B. heute schwer, wenig Schlaf")
+        submitted = st.form_submit_button("✅ Training abschließen", use_container_width=True, type="primary")
+
+    if submitted:
+        level_ups = []
+        clean_count = 0
+        for track in today_tracks:
+            result = log_cal_session(track, inputs[track]['sets'], inputs[track]['best'], notes)
+            if result['clean']:
+                clean_count += 1
+            if result['leveled_up']:
+                level_ups.append((track, result['new_level_name']))
+
+        points = 40 * clean_count + 15 * (len(today_tracks) - clean_count)
+        if entry_id:
+            toggle_done(entry_id, True, points=points)
+        else:
+            sync_daily_training()
+            entry_id, _ = get_todays_training_entry_id()
+            if entry_id:
+                toggle_done(entry_id, True, points=points)
+
+        st.balloons()
+        st.success(f"🎉 Training geloggt — {clean_count}/{len(today_tracks)} Übungen sauber geschafft, +{points} Punkte!")
+        for track, new_name in level_ups:
+            st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,149,0,0.1));
+                border:1px solid rgba(255,215,0,0.5);border-radius:12px;padding:14px 18px;margin-top:8px">
+                <span style="font-size:18px">⬆️</span> <strong style="color:#ffd700">Level-Up: {CAL_TRACKS[track]['label']}!</strong><br>
+                <span style="color:rgba(255,255,255,0.7);font-size:13px">Neue Übung freigeschaltet: <strong>{new_name}</strong></span>
+            </div>""", unsafe_allow_html=True)
+        time.sleep(0.3)
+        st.rerun()
+
+    st.markdown("---")
+
+    # ── Progressionsleitern ──────────────────────────────────────
+    st.markdown("### 🪜 Progressionsleitern")
+    st.caption("Dein Weg von Stufe 1 bis zur Königsdisziplin — unendlich, jede Stufe ein Schritt weiter.")
+    ladder_tracks = list(CAL_TRACKS.keys())
+    for row_start in range(0, len(ladder_tracks), 3):
+        cols = st.columns(3)
+        for col, track in zip(cols, ladder_tracks[row_start:row_start + 3]):
+            with col:
+                st.markdown(_cal_track_ladder_html(track), unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── KI Trainingscoach ─────────────────────────────────────────
+    st.markdown("### 🤖 KI Trainingscoach")
+    api_key = get_setting('nvidia_api_key', '')
+    if not api_key:
+        st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
+    else:
+        if st.button("🧠 Trainingsmuster analysieren", key="cal_coach_btn"):
+            with st.spinner("Coach analysiert deine Trainingsdaten…"):
+                st.session_state['_cal_coach_result'] = ki_training_coach(api_key)
+
+        result = st.session_state.get('_cal_coach_result')
+        if result:
+            if result.get('error') == 'no_data':
+                st.info("Noch keine Trainingsdaten — logge deine erste Einheit, dann kann der Coach Muster erkennen.")
+            elif result.get('error'):
+                st.error(f"Fehler: {result['error']}")
+            else:
+                weak = CAL_TRACKS.get(result.get('weak_track', ''), {}).get('label', '')
+                strong = CAL_TRACKS.get(result.get('strong_track', ''), {}).get('label', '')
+                st.markdown(f"""<div style="background:rgba(0,212,255,0.06);border:1px solid rgba(0,212,255,0.25);
+                    border-radius:14px;padding:18px 20px">
+                    <div style="font-size:15px;font-weight:800;color:#00d4ff;margin-bottom:10px">
+                        🎙️ {result.get('headline','')}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Muster erkannt:</strong> {result.get('pattern_detected','')}</div>
+                    {f'<div style="font-size:12px;color:#f39c12;margin-bottom:6px">⚠️ Braucht Aufmerksamkeit: {weak}</div>' if weak else ''}
+                    {f'<div style="font-size:12px;color:#2ecc71;margin-bottom:6px">📈 Bester Fortschritt: {strong}</div>' if strong else ''}
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Nächster Fokus:</strong> {result.get('next_focus','')}</div>
+                    <div style="font-size:12.5px;color:rgba(255,255,255,0.5);font-style:italic">
+                        {result.get('motivation','')}</div>
+                </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Konsistenz-Heatmap ─────────────────────────────────────
+    st.markdown("### 📅 Konsistenz (letzte 84 Tage)")
+    st.markdown(_cal_heatmap_html(), unsafe_allow_html=True)
+
+
 # ========== MAIN ==========
 
 def main():
@@ -6155,6 +6725,7 @@ def main():
 
     sync_recurring_tasks()
     sync_project_tasks()
+    sync_daily_training()
 
     # Fire pending backup (non-blocking, background)
     if st.session_state.pop('_backup_pending', False):
@@ -6164,7 +6735,7 @@ def main():
     if 'selected_project' not in st.session_state:
         st.session_state.selected_project = None
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
+    PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -6182,7 +6753,7 @@ def main():
 
     # ── Navigation ────────────────────────────────────────────
     _PAGE_ICONS = {
-        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯",
+        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯", "Training": "🏋️",
         "Projekte": "📁", "Alle Einträge": "📅", "Routinen": "🔄",
         "Habits": "✅", "Charakter": "🧙", "Season Pass": "🎖️",
         "KI Coach": "🤖", "Statistiken": "📊", "Einstellungen": "⚙️",
@@ -6213,6 +6784,8 @@ def main():
         render_planen_page()
     elif page == "Tagesfokus":
         render_tagesfokus_page()
+    elif page == "Training":
+        render_training_page()
     elif page == "Projekte":
         render_projekte_page()
     elif page == "Alle Einträge":
