@@ -719,6 +719,18 @@ def init_db():
         UNIQUE(task_key, log_date)
     )
     ''')
+    # ─── Spontane Gedanken ───────────────────────────────────────
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS spontaneous_thoughts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        content TEXT NOT NULL,
+        created_at TEXT,
+        sorted INTEGER DEFAULT 0,
+        sorted_at TEXT,
+        resolution TEXT,
+        entry_id INTEGER
+    )
+    ''')
     conn.commit()
     conn.close()
 
@@ -2334,6 +2346,111 @@ def _household_heatmap_html(days=60):
     {cells}
   </div>
 </div>"""
+
+
+# ========== SPONTANE GEDANKEN ==========
+
+def add_spontaneous_thought(content):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("INSERT INTO spontaneous_thoughts (content, created_at, sorted) VALUES (?,?,0)",
+              (content.strip(), now))
+    new_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+    return new_id
+
+
+def get_unsorted_thoughts():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT id, content, created_at FROM spontaneous_thoughts WHERE sorted=0 ORDER BY created_at"
+    ).fetchall()
+    conn.close()
+    return [{'id': r[0], 'content': r[1], 'created_at': r[2]} for r in rows]
+
+
+def get_unsorted_thought_count():
+    conn = sqlite3.connect(DB_PATH)
+    n = conn.execute("SELECT COUNT(*) FROM spontaneous_thoughts WHERE sorted=0").fetchone()[0]
+    conn.close()
+    return n
+
+
+def resolve_thought_to_entry(thought_id, content, entry_date):
+    """Verwandelt einen spontanen Gedanken in eine echte To-Do-Aufgabe an entry_date."""
+    new_id = add_entry("brain", content, estimate=10, entry_date=entry_date)
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE spontaneous_thoughts SET sorted=1, sorted_at=?, resolution=?, entry_id=? WHERE id=?",
+        (now, f"todo:{entry_date}", new_id, thought_id)
+    )
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+    return new_id
+
+
+def discard_thought(thought_id):
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "UPDATE spontaneous_thoughts SET sorted=1, sorted_at=?, resolution='discarded' WHERE id=?",
+        (now, thought_id)
+    )
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def _render_spontan_bubble():
+    """Permanent schwebende Post-it-Bubble zum spontanen Festhalten von Gedanken — auf jeder Seite sichtbar."""
+    st.markdown("""
+<style>
+div.st-key-spontan_bubble_fab {
+    position: fixed;
+    bottom: 22px;
+    right: 22px;
+    z-index: 999999;
+    width: auto !important;
+}
+div.st-key-spontan_bubble_fab button {
+    border-radius: 50% !important;
+    width: 54px !important;
+    height: 54px !important;
+    min-width: 54px !important;
+    padding: 0 !important;
+    font-size: 20px !important;
+    box-shadow: 0 4px 18px rgba(0,0,0,0.45) !important;
+    background: linear-gradient(135deg,#00d4ff 0%,#a29bfe 100%) !important;
+    border: none !important;
+    color: #0a0a0a !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+    unsorted_n = get_unsorted_thought_count()
+    label = f"💭 {unsorted_n}" if unsorted_n else "💭"
+    nonce = st.session_state.get('spontan_nonce', 0)
+
+    with st.container(key="spontan_bubble_fab"):
+        with st.popover(label, key="spontan_popover"):
+            st.markdown("**💭 Spontaner Gedanke**")
+            txt = st.text_area(
+                "Gedanke", key=f"spontan_input_{nonce}", label_visibility="collapsed",
+                placeholder="Kurz notieren, abends sortieren …", height=80
+            )
+            if st.button("✅ Ablegen", key="spontan_save", use_container_width=True):
+                if txt and txt.strip():
+                    add_spontaneous_thought(txt.strip())
+                    st.session_state['spontan_nonce'] = nonce + 1
+                    st.toast("Notiert — abends sortieren 📥", icon="💭")
+                    st.rerun()
+            if unsorted_n:
+                st.caption(f"📥 {unsorted_n} ungesortiert — auf der Start-Seite einsortieren")
 
 
 # ========== RECURRING TASKS ==========
@@ -4203,6 +4320,50 @@ tick();setInterval(tick,1000);
                         if st.button("✕ Schließen", key="close_review"):
                             del st.session_state['evening_review']
                             st.rerun()
+
+    # ── Spontane Gedanken sortieren ─────────────────────────────
+    unsorted_thoughts = get_unsorted_thoughts()
+    if unsorted_thoughts:
+        with st.expander(f"💭 Spontane Gedanken sortieren ({len(unsorted_thoughts)})", expanded=True):
+            st.caption("Jeden Gedanken einsortieren: heute erledigen, auf ein Datum legen, oder verwerfen.")
+            for th in unsorted_thoughts:
+                tid = th['id']
+                try:
+                    ts = datetime.fromisoformat(th['created_at']).strftime('%d.%m. %H:%M')
+                except Exception:
+                    ts = ''
+                st.markdown(
+                    f'<div style="padding:8px 10px;margin:10px 0 4px 0;background:rgba(255,255,255,0.04);'
+                    f'border-radius:8px 8px 0 0;border-left:3px solid #a29bfe">'
+                    f'<div style="font-size:13px;color:white">{th["content"]}</div>'
+                    f'<div style="font-size:10px;color:rgba(255,255,255,0.35);margin-top:2px">📝 {ts}</div>'
+                    f'</div>', unsafe_allow_html=True
+                )
+                c1, c2, c3, c4 = st.columns([1, 1, 1.4, 0.6])
+                with c1:
+                    if st.button("✅ Heute", key=f"th_today_{tid}", use_container_width=True):
+                        resolve_thought_to_entry(tid, th['content'], date.today().isoformat())
+                        st.rerun()
+                with c2:
+                    if st.button("➡️ Morgen", key=f"th_tom_{tid}", use_container_width=True):
+                        resolve_thought_to_entry(tid, th['content'], (date.today() + timedelta(days=1)).isoformat())
+                        st.rerun()
+                with c3:
+                    if st.session_state.get(f"th_show_date_{tid}"):
+                        d_val = st.date_input("Datum", value=date.today(), min_value=date.today(),
+                                               key=f"th_date_{tid}", label_visibility="collapsed")
+                        if st.button("✓ Übernehmen", key=f"th_dateconfirm_{tid}", use_container_width=True):
+                            resolve_thought_to_entry(tid, th['content'], d_val.isoformat())
+                            del st.session_state[f"th_show_date_{tid}"]
+                            st.rerun()
+                    else:
+                        if st.button("📅 Datum wählen", key=f"th_pickdate_{tid}", use_container_width=True):
+                            st.session_state[f"th_show_date_{tid}"] = True
+                            st.rerun()
+                with c4:
+                    if st.button("🗑️", key=f"th_discard_{tid}", use_container_width=True):
+                        discard_thought(tid)
+                        st.rerun()
 
 
 def render_start_page():
@@ -7884,6 +8045,9 @@ def main():
     PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Schlaf", "Haushalt", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
+
+    # ── Spontane-Gedanken-Bubble (permanent, auf jeder Seite) ──
+    _render_spontan_bubble()
 
     # ── Brand Header ──────────────────────────────────────────
     st.sidebar.markdown("""
