@@ -123,6 +123,34 @@ SLEEP_RAMP_STEP_MINUTES = 10
 SLEEP_GOAL_BEDTIME = "00:00"
 SLEEP_GOAL_WAKETIME = "08:00"
 
+# ─── Haushalt: wiederkehrende Aufgaben für ein Wohlfühl-Zuhause ───
+HOUSEHOLD_TASKS = [
+    # Täglich
+    {'key': 'dishes',        'icon': '🍽️', 'label': 'Geschirr spülen / Spülmaschine ein-/ausräumen', 'frequency': 'daily',   'est_minutes': 10},
+    {'key': 'kitchen_wipe',  'icon': '🧽', 'label': 'Küche kurz abwischen',                            'frequency': 'daily',   'est_minutes': 5},
+    {'key': 'tidy_reset',    'icon': '🧹', 'label': '5-Minuten-Reset (kurz aufräumen)',                'frequency': 'daily',   'est_minutes': 5},
+    {'key': 'trash_check',   'icon': '🗑️', 'label': 'Müll checken / rausbringen wenn voll',            'frequency': 'daily',   'est_minutes': 3},
+    {'key': 'make_bed',      'icon': '🛏️', 'label': 'Bett machen',                                     'frequency': 'daily',   'est_minutes': 2},
+    # Wöchentlich
+    {'key': 'laundry',       'icon': '🧺', 'label': 'Wäsche waschen',                                  'frequency': 'weekly',  'est_minutes': 20},
+    {'key': 'vacuum',        'icon': '🧹', 'label': 'Staubsaugen / Boden wischen',                     'frequency': 'weekly',  'est_minutes': 25},
+    {'key': 'bathroom_clean','icon': '🚽', 'label': 'Bad putzen (Toilette, Dusche, Waschbecken)',      'frequency': 'weekly',  'est_minutes': 25},
+    {'key': 'dust',          'icon': '🪶', 'label': 'Staub wischen',                                   'frequency': 'weekly',  'est_minutes': 15},
+    {'key': 'groceries',     'icon': '🛒', 'label': 'Einkaufen (Lebensmittel)',                        'frequency': 'weekly',  'est_minutes': 45},
+    {'key': 'plants',        'icon': '🪴', 'label': 'Pflanzen gießen',                                 'frequency': 'weekly',  'est_minutes': 5},
+    {'key': 'sheets',        'icon': '🛌', 'label': 'Bettwäsche wechseln',                              'frequency': 'weekly',  'est_minutes': 15},
+    # Monatlich
+    {'key': 'fridge_clean',  'icon': '🧊', 'label': 'Kühlschrank reinigen & aussortieren',             'frequency': 'monthly', 'est_minutes': 20},
+    {'key': 'windows',       'icon': '🪟', 'label': 'Fenster putzen',                                  'frequency': 'monthly', 'est_minutes': 30},
+    {'key': 'oven_micro',    'icon': '🔥', 'label': 'Backofen / Mikrowelle reinigen',                  'frequency': 'monthly', 'est_minutes': 20},
+    {'key': 'bathroom_deep', 'icon': '✨', 'label': 'Bad gründlich (Fugen, Kalk)',                      'frequency': 'monthly', 'est_minutes': 30},
+    {'key': 'appliance_care','icon': '🌀', 'label': 'Wasch-/Spülmaschine pflegen (Filter, Pflegegang)','frequency': 'monthly', 'est_minutes': 15},
+    {'key': 'declutter',     'icon': '📦', 'label': 'Schrank/Schublade ausmisten',                     'frequency': 'monthly', 'est_minutes': 25},
+    {'key': 'smoke_detector','icon': '🔔', 'label': 'Rauchmelder testen',                              'frequency': 'monthly', 'est_minutes': 5},
+]
+HOUSEHOLD_FREQUENCY_DAYS = {'daily': 1, 'weekly': 7, 'monthly': 30}
+HOUSEHOLD_FREQUENCY_LABELS = {'daily': '📅 Täglich', 'weekly': '🗓️ Wöchentlich', 'monthly': '📆 Monatlich'}
+
 # ─── Season exclusive item keys (not shown in regular shop) ──────
 SEASON_EXCLUSIVE_KEYS = {
     's1_aura_ocean','s1_aura_star','s1_aura_dawn','s1_aura_cosmic','s1_aura_rift',
@@ -679,6 +707,16 @@ def init_db():
         wake_time TEXT,
         notes TEXT,
         created_at TEXT
+    )
+    ''')
+    # ─── Haushalt ─────────────────────────────────────────────────
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS household_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_key TEXT NOT NULL,
+        log_date TEXT NOT NULL,
+        created_at TEXT,
+        UNIQUE(task_key, log_date)
     )
     ''')
     conn.commit()
@@ -2108,6 +2146,196 @@ def analyze_routine_patterns(min_n=3):
     return results
 
 
+# ========== HAUSHALT ==========
+
+def log_household_task(task_key, log_date=None):
+    log_date = log_date or date.today().isoformat()
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''INSERT INTO household_log (task_key, log_date, created_at)
+                     VALUES (?,?,?)
+                     ON CONFLICT(task_key, log_date) DO NOTHING''', (task_key, log_date, now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def unlog_household_task(task_key, log_date=None):
+    log_date = log_date or date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM household_log WHERE task_key=? AND log_date=?", (task_key, log_date))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def get_household_status():
+    """Für jede Haushaltsaufgabe: zuletzt erledigt, Tage seitdem, fällig/überfällig, Dringlichkeit."""
+    today = date.today()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("SELECT task_key, MAX(log_date) FROM household_log GROUP BY task_key").fetchall()
+    conn.close()
+    last_done_map = {k: v for k, v in rows}
+
+    out = []
+    for t in HOUSEHOLD_TASKS:
+        last_done = last_done_map.get(t['key'])
+        interval = HOUSEHOLD_FREQUENCY_DAYS[t['frequency']]
+        if last_done:
+            days_since = (today - date.fromisoformat(last_done)).days
+        else:
+            days_since = interval * 3  # nie gemacht -> klar überfällig, aber kein absurder Wert
+        due = days_since >= interval
+        overdue = days_since >= interval * 1.5
+        urgency = min(1.5, days_since / interval) if interval else 0
+        out.append({
+            **t, 'last_done': last_done, 'days_since': days_since,
+            'due': due, 'overdue': overdue, 'urgency': urgency,
+        })
+    return out
+
+
+def household_clean_score():
+    """Wohnung-Sauber-Score 0-100: Durchschnitt der 'Frische' aller Aufgaben relativ zu ihrem Intervall."""
+    status = get_household_status()
+    if not status:
+        return 100
+    freshness_vals = []
+    for t in status:
+        interval = HOUSEHOLD_FREQUENCY_DAYS[t['frequency']]
+        freshness = max(0.0, 1 - t['days_since'] / (interval * 1.5))
+        freshness_vals.append(freshness)
+    return int(round(sum(freshness_vals) / len(freshness_vals) * 100))
+
+
+def get_household_daily_streak():
+    daily_keys = [t['key'] for t in HOUSEHOLD_TASKS if t['frequency'] == 'daily']
+    if not daily_keys:
+        return {'current': 0, 'longest': 0}
+    placeholders = ",".join("?" * len(daily_keys))
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        f"SELECT log_date, COUNT(DISTINCT task_key) FROM household_log "
+        f"WHERE task_key IN ({placeholders}) GROUP BY log_date",
+        daily_keys
+    ).fetchall()
+    conn.close()
+    full_dates = {d for d, cnt in rows if cnt >= len(daily_keys)}
+    if not full_dates:
+        return {'current': 0, 'longest': 0}
+
+    today = date.today()
+    cur = 0
+    d = today if today.isoformat() in full_dates else today - timedelta(days=1)
+    while d.isoformat() in full_dates:
+        cur += 1
+        d -= timedelta(days=1)
+
+    sorted_dates = sorted(date.fromisoformat(x) for x in full_dates)
+    longest = run = 1
+    for i in range(1, len(sorted_dates)):
+        if (sorted_dates[i] - sorted_dates[i - 1]).days == 1:
+            run += 1
+            longest = max(longest, run)
+        else:
+            run = 1
+    longest = max(longest, cur)
+    return {'current': cur, 'longest': longest}
+
+
+def household_wohlfuehl_index():
+    """Kombiniert den Sauber-Score mit der Konsistenz der täglichen Mini-Routine."""
+    clean = household_clean_score()
+    streak = get_household_daily_streak()
+    consistency_bonus = min(20, streak['current'] * 2)
+    return min(100, int(round(clean * 0.8 + consistency_bonus)))
+
+
+def get_today_workload():
+    """Heutige Aufgabenlast — Grundlage für ein realistisches Haushalts-Zeitbudget."""
+    today_str = date.today().isoformat()
+    rows = get_today_entries()
+    undone = [r for r in rows if not r[9]]
+    total_estimate = sum((r[5] or 0) for r in undone)
+    deadlines_today = sum(1 for r in undone if r[13] == today_str)
+    return {
+        'undone_count': len(undone),
+        'total_estimate': total_estimate,
+        'deadlines_today': deadlines_today,
+    }
+
+
+def household_time_budget(workload=None):
+    """Wie viele Minuten Haushalt sind heute realistisch — abhängig von Deadlines/Workload.
+    An vollen Tagen (viele Deadlines/hoher geschätzter Aufwand) bleibt nur Zeit für Mini-Tasks."""
+    workload = workload or get_today_workload()
+    score = workload['deadlines_today'] * 2 + workload['undone_count']
+    if score >= 8 or workload['total_estimate'] >= 360:
+        return 10
+    elif score >= 4 or workload['total_estimate'] >= 180:
+        return 25
+    else:
+        return 60
+
+
+def suggest_household_break_tasks():
+    """Wählt fällige Haushaltsaufgaben passend zum heutigen, Deadline-bewussten Zeitbudget aus."""
+    status = get_household_status()
+    workload = get_today_workload()
+    budget = household_time_budget(workload)
+    due = [t for t in status if t['due']]
+    due.sort(key=lambda t: (-t['urgency'], t['est_minutes']))
+
+    picked, used = [], 0
+    for t in due:
+        if used + t['est_minutes'] <= budget:
+            picked.append(t)
+            used += t['est_minutes']
+
+    return {'tasks': picked, 'budget_minutes': budget, 'used_minutes': used, 'workload': workload}
+
+
+def _household_heatmap_html(days=60):
+    """Konsistenz-Heatmap der täglichen Haushalts-Mini-Routine (Anteil erledigter Daily-Tasks pro Tag)."""
+    daily_keys = [t['key'] for t in HOUSEHOLD_TASKS if t['frequency'] == 'daily']
+    today_d = date.today()
+    conn = sqlite3.connect(DB_PATH)
+    placeholders = ",".join("?" * len(daily_keys))
+    rows = conn.execute(
+        f"SELECT log_date, COUNT(DISTINCT task_key) FROM household_log "
+        f"WHERE task_key IN ({placeholders}) GROUP BY log_date",
+        daily_keys
+    ).fetchall() if daily_keys else []
+    conn.close()
+    frac_map = {d: cnt / len(daily_keys) for d, cnt in rows} if daily_keys else {}
+
+    color = "#2ecc71"
+
+    def cell_color(frac):
+        if not frac:
+            return "rgba(255,255,255,0.05)"
+        if frac >= 1:
+            return color
+        if frac >= 0.5:
+            return f"{color}88"
+        return f"{color}44"
+
+    cells = ""
+    for i in range(days - 1, -1, -1):
+        d = today_d - timedelta(days=i)
+        frac = frac_map.get(d.isoformat())
+        tip = f"{d.strftime('%d.%m')}: {int((frac or 0) * 100)}%"
+        cells += f'<div title="{tip}" style="width:14px;height:14px;background:{cell_color(frac)};border-radius:2px;flex-shrink:0"></div>'
+
+    return f"""<div style="background:rgba(255,255,255,0.03);border-radius:12px;padding:14px 16px;
+  border:1px solid rgba(255,255,255,0.07)">
+  <div style="font-size:12px;font-weight:700;color:white;margin-bottom:8px">🏡 Tägliche Haushalts-Routine</div>
+  <div style="display:flex;flex-wrap:wrap;gap:3px;width:calc(14*(14px + 3px))">
+    {cells}
+  </div>
+</div>"""
+
+
 # ========== RECURRING TASKS ==========
 
 DAY_ABBR = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
@@ -2977,6 +3205,76 @@ JSON-Format:
 }}"""
             }],
             max_tokens=700,
+            stream=False
+        )
+        raw = resp.choices[0].message.content.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+        return json.loads(raw)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def ki_haushalt_coach(api_key):
+    """Empfiehlt Haushalts-Pausen-Aufgaben für heute — Deadline-bewusst, gewählt nur aus echten Kandidaten."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+
+        today = date.today()
+        suggestion = suggest_household_break_tasks()
+        workload = suggestion['workload']
+        status = get_household_status()
+        overdue = [t for t in status if t['overdue']]
+        clean_score = household_clean_score()
+        wohlfuehl = household_wohlfuehl_index()
+
+        candidates_str = "\n".join(
+            f"- [{t['key']}] {t['icon']} {t['label']} ({t['frequency']}, ~{t['est_minutes']} Min, "
+            f"seit {t['days_since']} Tagen{' ÜBERFÄLLIG' if t['overdue'] else ''})"
+            for t in suggestion['tasks']
+        ) or "Keine fälligen Aufgaben innerhalb des heutigen Zeitbudgets."
+
+        overdue_str = "\n".join(
+            f"- {t['icon']} {t['label']} (seit {t['days_since']} Tagen überfällig)" for t in overdue[:5]
+        ) or "Keine überfälligen Aufgaben."
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    f"Du bist ein pragmatischer Haushalts-Coach für einen ADHS-Athleten. Heute ist {today.isoformat()}. "
+                    "Haushalt soll als kurze, erholsame Pause zwischen Deep-Work-Sessions passieren — kein "
+                    "zusätzlicher Stressfaktor. Wähle ausschließlich aus der gegebenen Kandidatenliste, erfinde "
+                    "keine neuen Aufgaben. Berücksichtige die heutige Deadline-Last: an vollen Tagen nur Mini-Tasks "
+                    "vorschlagen. Antworte ausschließlich mit validem JSON."
+                )
+            }, {
+                "role": "user",
+                "content": f"""HEUTIGE WORKLOAD: {workload['undone_count']} offene Aufgaben, {workload['deadlines_today']} Deadlines heute, ca. {workload['total_estimate']} Min geschätzter Aufwand.
+Zeitbudget für Haushalt heute: {suggestion['budget_minutes']} Minuten.
+
+KANDIDATEN FÜR HAUSHALTS-PAUSEN HEUTE (passend zum Budget):
+{candidates_str}
+
+ÜBERFÄLLIGE AUFGABEN (zur Info, evtl. nicht alle heute machbar):
+{overdue_str}
+
+Wohnung-Sauber-Score: {clean_score}/100, Wohlfühl-Index: {wohlfuehl}/100
+
+JSON-Format:
+{{
+  "headline": "Kurzer Coach-Satz zur heutigen Lage (1 Satz)",
+  "recommended_keys": ["task_key1", "task_key2"],
+  "reasoning": "Warum genau diese Auswahl angesichts der heutigen Workload (1-2 Sätze)",
+  "skip_today": "Was bewusst NICHT heute gemacht werden sollte und warum (1 Satz, ggf. leer)",
+  "motivation": "1 kurzer Motivationssatz"
+}}"""
+            }],
+            max_tokens=600,
             stream=False
         )
         raw = resp.choices[0].message.content.strip()
@@ -4522,7 +4820,7 @@ def _render_focus_mode():
             if remaining == 0:
                 st.success("⏰ 25 Minuten voll! Wie weiter?")
             st.write("")
-            btn1, btn2, btn3 = st.columns(3)
+            btn1, btn2, btn3, btn4 = st.columns(4)
             with btn1:
                 if st.button("✅ Aufgabe fertig", use_container_width=True, type="primary"):
                     done_secs = st.session_state.get('focus_total_seconds', 0) + (POMODORO_DURATION - remaining)
@@ -4539,6 +4837,12 @@ def _render_focus_mode():
                     st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
                     st.rerun()
             with btn3:
+                if st.button("🧺 Haushalts-Pause", use_container_width=True):
+                    prev = st.session_state.get('focus_total_seconds', 0)
+                    st.session_state.focus_total_seconds = prev + (POMODORO_DURATION - remaining)
+                    st.session_state.focus_phase = 'household_break'
+                    st.rerun()
+            with btn4:
                 if st.button("🚫 Abbrechen", use_container_width=True):
                     _clear_focus_mode()
                     st.rerun()
@@ -4546,6 +4850,37 @@ def _render_focus_mode():
         if remaining > 0:
             time.sleep(1)
             st.rerun()
+
+    # ── Phase 2b: Haushalts-Pause ─────────────────────────────────
+    elif phase == 'household_break':
+        suggestion = suggest_household_break_tasks()
+        pick = suggestion['tasks'][0] if suggestion['tasks'] else None
+
+        with center:
+            st.markdown('<div class="focus-hdr">🧺 Haushalts-Pause</div>', unsafe_allow_html=True)
+            if pick:
+                st.markdown(f'<div class="focus-task">{pick["icon"]} {pick["label"]}</div>', unsafe_allow_html=True)
+                st.caption(f"~{pick['est_minutes']} Min · passt ins heutige Zeitbudget "
+                          f"({suggestion['budget_minutes']} Min)")
+            else:
+                st.markdown('<div class="focus-task">🎉 Nichts dringend fällig</div>', unsafe_allow_html=True)
+                st.caption("Mach trotzdem kurz Beine — z.B. strecken, Wasser holen, durchlüften.")
+            st.write("")
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("✅ Erledigt, weiter geht's", use_container_width=True, type="primary"):
+                    if pick:
+                        log_household_task(pick['key'])
+                    st.session_state.focus_round = st.session_state.get('focus_round', 1) + 1
+                    st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
+                    st.session_state.focus_phase = 'pomodoro'
+                    st.rerun()
+            with b2:
+                if st.button("⏭️ Ohne Pause weiter", use_container_width=True):
+                    st.session_state.focus_round = st.session_state.get('focus_round', 1) + 1
+                    st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
+                    st.session_state.focus_phase = 'pomodoro'
+                    st.rerun()
 
     # ── Phase 3: KI Review ──────────────────────────────────────────
     elif phase == 'review':
@@ -4656,6 +4991,26 @@ def render_tagesfokus_page():
         height=240
     )
     st.markdown("---")
+
+    # ── Haushalts-Pausen-Vorschlag (Deadline-bewusst) ──────────────
+    hh_suggestion = suggest_household_break_tasks()
+    with st.expander(f"🏡 Haushalts-Pause heute (~{hh_suggestion['budget_minutes']} Min Zeitbudget)",
+                     expanded=False):
+        if hh_suggestion['tasks']:
+            for t in hh_suggestion['tasks']:
+                c1, c2 = st.columns([0.78, 0.22])
+                with c1:
+                    st.markdown(f"{t['icon']} **{t['label']}** (~{t['est_minutes']} Min)"
+                               + (" 🔴 überfällig" if t['overdue'] else ""), unsafe_allow_html=True)
+                with c2:
+                    if st.button("✅ Erledigt", key=f"tf_hh_{t['key']}", use_container_width=True):
+                        log_household_task(t['key'])
+                        st.rerun()
+        else:
+            st.success("Heute ist nichts dringend fällig. 🎉")
+        if st.button("🏡 Zur Haushalt-Seite →", key="tf_hh_goto", use_container_width=True):
+            st.session_state.page = "Haushalt"
+            st.rerun()
 
     if not rows:
         st.info("Noch keine Aufgaben für heute — starte mit dem Tag planen.")
@@ -7350,6 +7705,153 @@ def render_sleep_page():
         st.markdown(_routine_heatmap_html('evening'), unsafe_allow_html=True)
 
 
+# ========== HAUSHALT SEITE ==========
+
+def _household_score_hero_html(clean_score, wohlfuehl):
+    def bar(label, value, color):
+        return f"""<div style="flex:1;min-width:180px">
+  <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+    <span style="font-size:11px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:1px">{label}</span>
+    <span style="font-size:15px;font-weight:900;color:{color}">{value}</span>
+  </div>
+  <div style="height:10px;background:rgba(255,255,255,0.08);border-radius:5px">
+    <div style="height:100%;width:{value}%;background:{color};border-radius:5px"></div>
+  </div>
+</div>"""
+
+    return f"""<div style="background:linear-gradient(135deg,rgba(46,204,113,0.08),rgba(52,152,219,0.05));
+  border:1px solid rgba(46,204,113,0.25);border-radius:16px;padding:20px 24px;
+  display:flex;gap:24px;flex-wrap:wrap">
+  {bar("🏡 Wohnung-Sauber-Score", clean_score, "#2ecc71")}
+  {bar("😌 Wohlfühl-Index", wohlfuehl, "#00d4ff")}
+</div>"""
+
+
+def _household_status_badge(t):
+    if t['overdue']:
+        return f'<span style="color:#e74c3c;font-weight:700">🔴 überfällig (seit {t["days_since"]}d)</span>'
+    if t['due']:
+        return '<span style="color:#f39c12;font-weight:700">🟡 fällig</span>'
+    if t['last_done']:
+        return f'<span style="color:#2ecc71">✅ vor {t["days_since"]}d</span>'
+    return '<span style="color:rgba(255,255,255,0.4)">— noch nie erledigt</span>'
+
+
+def _render_household_section(status_all, frequency, today_str):
+    tasks = [t for t in status_all if t['frequency'] == frequency]
+    st.markdown(f"#### {HOUSEHOLD_FREQUENCY_LABELS[frequency]}")
+    for t in tasks:
+        c1, c2, c3 = st.columns([0.5, 0.28, 0.22])
+        with c1:
+            st.markdown(f"{t['icon']} **{t['label']}** <span style='font-size:10px;color:rgba(255,255,255,0.35)'>"
+                        f"~{t['est_minutes']} Min</span>", unsafe_allow_html=True)
+        with c2:
+            st.markdown(_household_status_badge(t), unsafe_allow_html=True)
+        with c3:
+            if frequency == 'daily':
+                done_today = t['last_done'] == today_str
+                new = st.checkbox("erledigt", value=done_today, key=f"hh_{t['key']}_{today_str}",
+                                  label_visibility="collapsed")
+                if new != done_today:
+                    if new:
+                        log_household_task(t['key'], today_str)
+                    else:
+                        unlog_household_task(t['key'], today_str)
+                    st.rerun()
+            else:
+                if st.button("✅ Erledigt", key=f"hh_btn_{t['key']}_{today_str}", use_container_width=True):
+                    log_household_task(t['key'], today_str)
+                    st.rerun()
+
+
+def render_haushalt_page():
+    st.title("🏡 Haushalt")
+    st.caption("Wiederkehrende Aufgaben für ein Wohlfühl-Zuhause — als Pause zwischen Deep-Work-Sessions.")
+
+    today_str = date.today().isoformat()
+    status_all = get_household_status()
+    clean_score = household_clean_score()
+    wohlfuehl = household_wohlfuehl_index()
+
+    st.markdown(_household_score_hero_html(clean_score, wohlfuehl), unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Workload-bewusster Pausen-Vorschlag ───────────────────────
+    suggestion = suggest_household_break_tasks()
+    st.markdown("### ☕ Haushalts-Pausen heute")
+    wl = suggestion['workload']
+    st.caption(f"Zeitbudget heute: ~{suggestion['budget_minutes']} Min "
+              f"({wl['undone_count']} offene Aufgaben, {wl['deadlines_today']} Deadlines heute)")
+    if suggestion['tasks']:
+        for t in suggestion['tasks']:
+            st.markdown(f"- {t['icon']} **{t['label']}** (~{t['est_minutes']} Min)"
+                       + (" 🔴 überfällig" if t['overdue'] else ""))
+    else:
+        st.success("Heute ist nichts dringend fällig — alles im grünen Bereich. 🎉")
+
+    st.markdown("---")
+
+    # ── Streak ─────────────────────────────────────────────────────
+    streak = get_household_daily_streak()
+    st.markdown(f"""<div style="text-align:center;background:rgba(46,204,113,0.06);border-radius:14px;
+        padding:14px;border:1px solid rgba(46,204,113,0.25);margin-bottom:10px">
+        <div style="font-size:24px">🏡</div>
+        <div style="font-size:22px;font-weight:900;color:#2ecc71">{streak['current']}</div>
+        <div style="font-size:10px;color:rgba(255,255,255,0.4)">TAGE TÄGLICHE HAUSHALTS-ROUTINE VOLL</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Aufgabenlisten nach Frequenz ───────────────────────────────
+    _render_household_section(status_all, 'daily', today_str)
+    st.markdown("")
+    _render_household_section(status_all, 'weekly', today_str)
+    st.markdown("")
+    _render_household_section(status_all, 'monthly', today_str)
+
+    st.markdown("---")
+
+    # ── KI Haushaltscoach ────────────────────────────────────────
+    st.markdown("### 🤖 KI Haushaltscoach")
+    api_key = get_setting('nvidia_api_key', '')
+    if not api_key:
+        st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
+    else:
+        if st.button("🧠 Haushalts-Pausen für heute empfehlen", key="haushalt_coach_btn"):
+            with st.spinner("Coach plant deine Pausen…"):
+                st.session_state['_haushalt_coach_result'] = ki_haushalt_coach(api_key)
+        result = st.session_state.get('_haushalt_coach_result')
+        if result:
+            if result.get('error'):
+                st.error(f"Fehler: {result['error']}")
+            else:
+                key_map = {t['key']: t for t in HOUSEHOLD_TASKS}
+                rec_keys = result.get('recommended_keys') or []
+                rec_str = ", ".join(
+                    f"{key_map[k]['icon']} {key_map[k]['label']}" for k in rec_keys if k in key_map
+                ) or "—"
+                st.markdown(f"""<div style="background:rgba(46,204,113,0.06);border:1px solid rgba(46,204,113,0.25);
+                    border-radius:14px;padding:18px 20px">
+                    <div style="font-size:15px;font-weight:800;color:#2ecc71;margin-bottom:10px">
+                        🎙️ {result.get('headline','')}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Empfehlung:</strong> {rec_str}</div>
+                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                        <strong>Begründung:</strong> {result.get('reasoning','')}</div>
+                    <div style="font-size:12.5px;color:rgba(255,255,255,0.6);margin-bottom:8px">
+                        <strong>Heute bewusst nicht:</strong> {result.get('skip_today','') or '—'}</div>
+                    <div style="font-size:12.5px;color:rgba(255,255,255,0.5);font-style:italic">
+                        {result.get('motivation','')}</div>
+                </div>""", unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # ── Konsistenz-Heatmap ─────────────────────────────────────────
+    st.markdown("### 📅 Konsistenz (letzte 60 Tage)")
+    st.markdown(_household_heatmap_html(), unsafe_allow_html=True)
+
+
 # ========== MAIN ==========
 
 def main():
@@ -7379,7 +7881,7 @@ def main():
     if 'selected_project' not in st.session_state:
         st.session_state.selected_project = None
 
-    PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Schlaf", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
+    PAGES = ["Start", "Planen", "Tagesfokus", "Training", "Schlaf", "Haushalt", "Projekte", "Alle Einträge", "Routinen", "Habits", "Charakter", "Season Pass", "KI Coach", "Statistiken", "Einstellungen"]
     if st.session_state.page not in PAGES:
         st.session_state.page = "Start"
 
@@ -7397,7 +7899,7 @@ def main():
 
     # ── Navigation ────────────────────────────────────────────
     _PAGE_ICONS = {
-        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯", "Training": "🏋️", "Schlaf": "🌙",
+        "Start": "🏠", "Planen": "📋", "Tagesfokus": "🎯", "Training": "🏋️", "Schlaf": "🌙", "Haushalt": "🏡",
         "Projekte": "📁", "Alle Einträge": "📅", "Routinen": "🔄",
         "Habits": "✅", "Charakter": "🧙", "Season Pass": "🎖️",
         "KI Coach": "🤖", "Statistiken": "📊", "Einstellungen": "⚙️",
@@ -7432,6 +7934,8 @@ def main():
         render_training_page()
     elif page == "Schlaf":
         render_sleep_page()
+    elif page == "Haushalt":
+        render_haushalt_page()
     elif page == "Projekte":
         render_projekte_page()
     elif page == "Alle Einträge":
