@@ -771,6 +771,15 @@ def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0,
     return new_id
 
 
+def delete_entry(entry_id):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM task_steps WHERE entry_id=?", (entry_id,))
+    conn.execute("DELETE FROM entries WHERE id=?", (entry_id,))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
 def _schedule_backup():
     """Set a flag so the next rerun triggers a backup. Non-blocking."""
     try:
@@ -4531,7 +4540,13 @@ def render_planen_page():
                                                    placeholder="z.B. Tab öffnen, Datei suchen...",
                                                    label_visibility="collapsed",
                                                    key=f"pl_micro_{eid}")
-                    if st.form_submit_button("Speichern", key=f"pl_save_{eid}", use_container_width=True):
+                    _fsave, _fdel = st.columns([4, 1])
+                    with _fsave:
+                        clicked_save = st.form_submit_button("Speichern", use_container_width=True)
+                    with _fdel:
+                        clicked_del = st.form_submit_button("🗑️", use_container_width=True,
+                                                             type="secondary")
+                    if clicked_save:
                         if sel_cat != "— keine —":
                             chosen = next((c for c in categories if f"{c['icon']} {c['name']}" == sel_cat), None)
                             if chosen:
@@ -4543,6 +4558,9 @@ def render_planen_page():
                                         (sel_micro.strip() or None, eid))
                         conn_td.commit()
                         conn_td.close()
+                        st.rerun()
+                    if clicked_del:
+                        delete_entry(eid)
                         st.rerun()
 
             st.markdown("---")
