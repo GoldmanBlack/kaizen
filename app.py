@@ -783,6 +783,16 @@ def add_entry(entry_type, content, tags=None, priority=0, estimate=0, points=0,
 
 def delete_entry(entry_id):
     conn = sqlite3.connect(DB_PATH)
+    # If this is a project-task entry, reschedule the underlying project_tasks
+    # row to tomorrow; without this, sync_project_tasks() would immediately
+    # re-add the entry on the next rerun.
+    row = conn.execute("SELECT content, tags FROM entries WHERE id=?", (entry_id,)).fetchone()
+    if row and row[1] and 'projekt' in row[1]:
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        conn.execute(
+            "UPDATE project_tasks SET scheduled_date=? WHERE content=? AND done=0",
+            (tomorrow, row[0])
+        )
     conn.execute("DELETE FROM task_steps WHERE entry_id=?", (entry_id,))
     conn.execute("DELETE FROM entries WHERE id=?", (entry_id,))
     conn.commit()
