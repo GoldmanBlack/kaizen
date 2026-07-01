@@ -4596,13 +4596,7 @@ def render_planen_page():
                                                    placeholder="z.B. Tab öffnen, Datei suchen...",
                                                    label_visibility="collapsed",
                                                    key=f"pl_micro_{eid}")
-                    _fsave, _fdel = st.columns([4, 1])
-                    with _fsave:
-                        clicked_save = st.form_submit_button("Speichern", use_container_width=True)
-                    with _fdel:
-                        clicked_del = st.form_submit_button("🗑️", use_container_width=True,
-                                                             type="secondary")
-                    if clicked_save:
+                    if st.form_submit_button("Speichern", use_container_width=True):
                         if sel_cat != "— keine —":
                             chosen = next((c for c in categories if f"{c['icon']} {c['name']}" == sel_cat), None)
                             if chosen:
@@ -4615,9 +4609,10 @@ def render_planen_page():
                         conn_td.commit()
                         conn_td.close()
                         st.rerun()
-                    if clicked_del:
-                        delete_entry(eid)
-                        st.rerun()
+
+                if st.button("🗑️ Löschen", key=f"pl_del_{eid}", use_container_width=True):
+                    delete_entry(eid)
+                    st.rerun()
 
             st.markdown("---")
             if st.button("✅ Fertig — zum Tagesfokus", key="plan_step4_done", use_container_width=True):
