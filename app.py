@@ -5636,7 +5636,7 @@ def render_tagesfokus_page():
             st.caption("Diese Gedanken hast du heute festgehalten — was passiert damit?")
             tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
             for th in unsorted:
-                th_id, th_content, th_created = th[0], th[1], th[2]
+                th_id, th_content, th_created = th['id'], th['content'], th['created_at']
                 with st.container(border=True):
                     st.markdown(f"**{th_content}**")
                     if th_created:
