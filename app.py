@@ -731,6 +731,16 @@ def init_db():
         entry_id INTEGER
     )
     ''')
+    # ─── Tagebuch / Tagesreflexion ───────────────────────────────
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS journal_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_date TEXT NOT NULL UNIQUE,
+        content TEXT,
+        created_at TEXT,
+        updated_at TEXT
+    )
+    ''')
     conn.commit()
     conn.close()
 
@@ -2460,6 +2470,43 @@ div.st-key-spontan_bubble_fab button {
                     st.rerun()
             if unsorted_n:
                 st.caption(f"📥 {unsorted_n} ungesortiert — auf der Start-Seite einsortieren")
+
+
+# ========== JOURNAL / TAGESREFLEXION ==========
+
+def save_journal_entry(content):
+    now = datetime.utcnow().isoformat()
+    today_str = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        INSERT INTO journal_entries (entry_date, content, created_at, updated_at)
+        VALUES (?,?,?,?)
+        ON CONFLICT(entry_date) DO UPDATE SET content=excluded.content, updated_at=excluded.updated_at
+    ''', (today_str, content.strip(), now, now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+
+
+def get_journal_entry(date_str=None):
+    date_str = date_str or date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute("SELECT content FROM journal_entries WHERE entry_date=?", (date_str,)).fetchone()
+    conn.close()
+    return row[0] if row else ""
+
+
+def render_evening_routine_checklist(today_str=None):
+    """Abendroutine-Checkliste, wiederverwendbar in Schlaf-Seite und Tag-abschließen-Tab."""
+    today_str = today_str or date.today().isoformat()
+    checks_pm = get_routine_checks(today_str, 'evening')
+    for t in EVENING_ROUTINE_TASKS:
+        cur = checks_pm.get(t['key'], False)
+        new = st.checkbox(f"{t['icon']} {t['label']}", value=cur,
+                          key=f"eve_chk_{t['key']}_{today_str}")
+        if new != cur:
+            set_routine_check(today_str, 'evening', t['key'], new)
+            st.rerun()
 
 
 # ========== RECURRING TASKS ==========
@@ -5431,9 +5478,10 @@ def render_tagesfokus_page():
     open_hl    = sum(1 for r in highlights if not r[9])
     open_todos = sum(1 for r in brains if not r[9])
 
-    tab_hl, tab_todo = st.tabs([
+    tab_hl, tab_todo, tab_close = st.tabs([
         f"⭐ Highlight ({open_hl} offen)",
-        f"📝 To-Do Liste ({open_todos} offen)"
+        f"📝 To-Do Liste ({open_todos} offen)",
+        "🌙 Tag abschließen"
     ])
 
     # ── TAB 1: DAILY HIGHLIGHT ───────────────────────────────────────
@@ -5505,6 +5553,109 @@ def render_tagesfokus_page():
                         render_row(r, "fok-br fok-done", "brd")
         else:
             st.info("Noch keine Aufgaben — füge sie über Brain Dump in Planen oder ➕ hinzu.")
+
+    # ── TAB 3: TAG ABSCHLIEßEN ───────────────────────────────────────
+    with tab_close:
+        today_str = date.today().isoformat()
+        api_key   = get_setting('nvidia_api_key', '')
+        already_closed = bool(get_journal_entry(today_str))
+
+        # ── Hero ────────────────────────────────────────────────────
+        pct_display = int(pct * 100)
+        bar_col = "#e74c3c" if pct_display < 30 else "#f39c12" if pct_display < 65 else "#2ecc71"
+        st.markdown(f"""
+<div style="background:linear-gradient(135deg,rgba(155,89,182,0.12) 0%,rgba(0,0,0,0) 100%);
+            border:1px solid rgba(155,89,182,0.25);border-radius:16px;padding:20px 24px;margin-bottom:18px">
+  <div style="font-size:11px;color:rgba(255,255,255,0.4);letter-spacing:3px;
+              text-transform:uppercase;margin-bottom:10px">🌙 Tagesabschluss</div>
+  <div style="display:flex;align-items:center;gap:24px">
+    <div style="text-align:center">
+      <div style="font-size:36px;font-weight:900;color:{bar_col}">{pct_display}%</div>
+      <div style="font-size:10px;color:rgba(255,255,255,0.35)">erledigt</div>
+    </div>
+    <div style="flex:1">
+      <div style="display:flex;justify-content:space-between;font-size:11px;
+                  color:rgba(255,255,255,0.45);margin-bottom:5px">
+        <span>✅ {done_count} erledigt</span><span>⏳ {total - done_count} offen</span>
+      </div>
+      <div style="background:rgba(255,255,255,0.1);border-radius:4px;height:6px;overflow:hidden">
+        <div style="width:{pct_display}%;height:100%;background:{bar_col};border-radius:4px"></div>
+      </div>
+    </div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # ── 1. KI-Tagesreview ───────────────────────────────────────
+        st.markdown("#### 🤖 KI-Tagesreview")
+        if api_key:
+            if st.button("🌙 Tag abschließen & KI-Review erstellen", key="tc_ki_review",
+                         use_container_width=True, type="primary"):
+                with st.spinner("KI analysiert deinen Tag …"):
+                    rv = ki_evening_review(api_key)
+                st.session_state['tc_review'] = rv
+                st.rerun()
+
+            if 'tc_review' in st.session_state:
+                rv = st.session_state['tc_review']
+                if 'error' in rv:
+                    st.error(f"Fehler: {rv['error']}")
+                else:
+                    st.markdown(f"**{rv.get('headline', 'Tagesrückblick')}**")
+                    wins = rv.get('wins', [])
+                    if wins:
+                        for w in wins:
+                            st.markdown(f"- 🏆 {w}")
+                    if rv.get('open_note'):
+                        st.info(f"📝 {rv['open_note']}")
+                    for alert in rv.get('upcoming_alerts', []):
+                        st.warning(alert)
+                    if rv.get('optimization_tip'):
+                        st.success(f"💡 **Morgen:** {rv['optimization_tip']}")
+                    if rv.get('tomorrow_focus'):
+                        st.markdown(f"🎯 Fokus morgen: **{rv['tomorrow_focus']}**")
+                    if rv.get('motivation'):
+                        st.caption(f"*{rv['motivation']}*")
+        else:
+            st.caption("Kein API-Key hinterlegt — KI-Review in den Einstellungen aktivieren.")
+
+        st.markdown("---")
+
+        # ── 2. Manuelle Tagesreflexion ──────────────────────────────
+        st.markdown("#### 📓 Tagesreflexion")
+        existing_entry = get_journal_entry(today_str)
+        journal_nonce = st.session_state.get('journal_nonce', 0)
+        journal_text  = st.text_area(
+            "Reflexion", key=f"tc_journal_{journal_nonce}",
+            value=existing_entry,
+            label_visibility="collapsed",
+            placeholder="Was lief heute gut? Was nehme ich mit? Was war schwierig?\n\nFreier Brain-Dump — kein Druck, keine Regeln.",
+            height=160
+        )
+        tc1, tc2 = st.columns([3, 1])
+        with tc1:
+            if st.button("💾 Reflexion speichern", key="tc_journal_save", use_container_width=True):
+                if journal_text and journal_text.strip():
+                    save_journal_entry(journal_text.strip())
+                    st.session_state['journal_nonce'] = journal_nonce + 1
+                    st.toast("Reflexion gespeichert ✓", icon="📓")
+                    st.rerun()
+        with tc2:
+            if existing_entry:
+                st.success("✓ gespeichert")
+
+        st.markdown("---")
+
+        # ── 3. Abendroutine ─────────────────────────────────────────
+        st.markdown("#### 🌙 Abendroutine")
+        checks_pm = get_routine_checks(today_str, 'evening')
+        done_pm = sum(1 for t in EVENING_ROUTINE_TASKS if checks_pm.get(t['key'], False))
+        st.caption(f"{done_pm}/{len(EVENING_ROUTINE_TASKS)} erledigt")
+        render_evening_routine_checklist(today_str)
+
+        st.markdown("---")
+        if st.button("😴 Zur Schlaf-Seite →", key="tc_goto_sleep", use_container_width=True):
+            st.session_state.page = "Schlaf"
+            st.rerun()
 
 
 def render_alle_eintraege_page():
@@ -7757,13 +7908,7 @@ def render_sleep_page():
         except Exception:
             pass
         st.markdown(f"#### 🌙 Abendroutine{f' (ab {evening_start} Uhr)' if evening_start else ''}")
-        checks_pm = get_routine_checks(today_str, 'evening')
-        for t in EVENING_ROUTINE_TASKS:
-            cur = checks_pm.get(t['key'], False)
-            new = st.checkbox(f"{t['icon']} {t['label']}", value=cur, key=f"sleep_pm_{t['key']}_{today_str}")
-            if new != cur:
-                set_routine_check(today_str, 'evening', t['key'], new)
-                st.rerun()
+        render_evening_routine_checklist(today_str)
 
     st.markdown("---")
 
