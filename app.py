@@ -2990,6 +2990,25 @@ def _handle_ki_error(e):
         st.error(f"❌ Fehler: {err}")
 
 
+def _parse_ki_json(raw: str) -> dict:
+    """Robustly extract JSON from an LLM response that may be wrapped in markdown fences
+    or contain trailing commas / other minor syntax issues."""
+    import re as _re
+    # Strip markdown code fences
+    raw = raw.strip()
+    raw = _re.sub(r'^```(?:json)?\s*', '', raw, flags=_re.IGNORECASE)
+    raw = _re.sub(r'\s*```$', '', raw)
+    raw = raw.strip()
+    # Extract the outermost {...} block
+    start = raw.find('{')
+    end   = raw.rfind('}')
+    if start != -1 and end != -1 and end > start:
+        raw = raw[start:end + 1]
+    # Remove trailing commas before } or ]
+    raw = _re.sub(r',\s*([}\]])', r'\1', raw)
+    return json.loads(raw)
+
+
 def ki_plan_task(api_key, task_description, task_date_str):
     """Call KI to decompose a task into subtasks. Returns list of dicts or None on error."""
     try:
@@ -3151,7 +3170,7 @@ JSON-Format:
     }}
   ],
   "day_summary": "Gesamteinschätzung des Tages in 1-2 Sätzen",
-  "focus_order": [liste der entry_ids in empfohlener Reihenfolge],
+  "focus_order": [123, 456],
   "total_estimated_minutes": 180
 }}"""
 
@@ -3164,12 +3183,8 @@ JSON-Format:
             max_tokens=2500,
             stream=False
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        raw = resp.choices[0].message.content
+        return _parse_ki_json(raw)
     except Exception as e:
         return {"error": str(e)}
 
@@ -3243,12 +3258,7 @@ JSON-Format:
             max_tokens=800,
             stream=False
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        return _parse_ki_json(resp.choices[0].message.content)
     except Exception as e:
         return {"error": str(e)}
 
@@ -3318,12 +3328,7 @@ JSON-Format:
             max_tokens=700,
             stream=False
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        return _parse_ki_json(resp.choices[0].message.content)
     except Exception as e:
         return {"error": str(e)}
 
@@ -3399,12 +3404,7 @@ JSON-Format:
             max_tokens=700,
             stream=False
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        return _parse_ki_json(resp.choices[0].message.content)
     except Exception as e:
         return {"error": str(e)}
 
@@ -3469,12 +3469,7 @@ JSON-Format:
             max_tokens=600,
             stream=False
         )
-        raw = resp.choices[0].message.content.strip()
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-        return json.loads(raw)
+        return _parse_ki_json(resp.choices[0].message.content)
     except Exception as e:
         return {"error": str(e)}
 
@@ -5634,7 +5629,41 @@ def render_tagesfokus_page():
 
         st.markdown("---")
 
-        # ── 2. Manuelle Tagesreflexion ──────────────────────────────
+        # ── 2. Spontane Gedanken sortieren ──────────────────────────
+        unsorted = get_unsorted_thoughts()
+        if unsorted:
+            st.markdown(f"#### 💭 Spontane Gedanken sortieren ({len(unsorted)})")
+            st.caption("Diese Gedanken hast du heute festgehalten — was passiert damit?")
+            tomorrow_str = (date.today() + timedelta(days=1)).isoformat()
+            for th in unsorted:
+                th_id, th_content, th_created = th[0], th[1], th[2]
+                with st.container(border=True):
+                    st.markdown(f"**{th_content}**")
+                    if th_created:
+                        try:
+                            ts = datetime.fromisoformat(th_created).strftime("%H:%M")
+                            st.caption(f"notiert um {ts}")
+                        except Exception:
+                            pass
+                    sc1, sc2, sc3 = st.columns(3)
+                    with sc1:
+                        if st.button("✅ Heute", key=f"tc_sp_today_{th_id}", use_container_width=True):
+                            resolve_thought_to_entry(th_id, th_content, today_str)
+                            st.toast("Als Aufgabe für heute angelegt ✓", icon="✅")
+                            st.rerun()
+                    with sc2:
+                        if st.button("➡️ Morgen", key=f"tc_sp_tmrw_{th_id}", use_container_width=True):
+                            resolve_thought_to_entry(th_id, th_content, tomorrow_str)
+                            st.toast("Als Aufgabe für morgen angelegt ✓", icon="➡️")
+                            st.rerun()
+                    with sc3:
+                        if st.button("🗑️ Verwerfen", key=f"tc_sp_disc_{th_id}", use_container_width=True):
+                            discard_thought(th_id)
+                            st.toast("Verworfen ✓", icon="🗑️")
+                            st.rerun()
+            st.markdown("---")
+
+        # ── 3. Manuelle Tagesreflexion ──────────────────────────────
         st.markdown("#### 📓 Tagesreflexion")
         existing_entry = get_journal_entry(today_str)
         journal_nonce = st.session_state.get('journal_nonce', 0)
@@ -5659,7 +5688,7 @@ def render_tagesfokus_page():
 
         st.markdown("---")
 
-        # ── 3. Abendroutine ─────────────────────────────────────────
+        # ── 4. Abendroutine ─────────────────────────────────────────
         st.markdown("#### 🌙 Abendroutine")
         checks_pm = get_routine_checks(today_str, 'evening')
         done_pm = sum(1 for t in EVENING_ROUTINE_TASKS if checks_pm.get(t['key'], False))
