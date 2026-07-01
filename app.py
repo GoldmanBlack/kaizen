@@ -916,6 +916,11 @@ def toggle_done(entry_id, new, elapsed_seconds=0, points=None):
             points = POINTS_PER_TASK
         c.execute('UPDATE entries SET done=1, completed_at=?, elapsed_seconds=?, points=?, last_modified=?, started_at=NULL WHERE id=?',
                   (now, elapsed_seconds, points, now, entry_id))
+        # Propagate to project_tasks if this is a project entry, so it won't re-appear
+        row_tags = c.execute("SELECT content, tags FROM entries WHERE id=?", (entry_id,)).fetchone()
+        if row_tags and row_tags[1] and 'projekt' in row_tags[1]:
+            c.execute("UPDATE project_tasks SET done=1, completed_at=? WHERE content=? AND done=0",
+                      (now, row_tags[0]))
         conn.commit()
         conn.close()
         _schedule_backup()
@@ -1760,22 +1765,26 @@ def schedule_project_tasks(project_id):
 
 
 def sync_project_tasks():
-    """Auto-add today's scheduled project tasks to entries (once per day)."""
+    """Auto-add today's scheduled project tasks to entries; also rolls forward past-due undone tasks."""
     today_str = date.today().isoformat()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    # Include tasks scheduled for today OR overdue (scheduled_date < today, still undone)
     c.execute('''SELECT pt.id, pt.content, pt.estimate_minutes, p.name
                  FROM project_tasks pt JOIN projects p ON pt.project_id=p.id
-                 WHERE pt.scheduled_date=? AND pt.done=0 AND p.active=1''', (today_str,))
+                 WHERE pt.scheduled_date <= ? AND pt.done=0 AND p.active=1
+                   AND (pt.scheduled_date IS NOT NULL AND pt.scheduled_date != '')''', (today_str,))
     tasks = c.fetchall()
     for task_id, content, estimate, project_name in tasks:
         c.execute('SELECT COUNT(*) FROM entries WHERE entry_date=? AND content=? AND tags LIKE ?',
-                  (today_str, content, f'%projekt%'))
+                  (today_str, content, '%projekt%'))
         if c.fetchone()[0] == 0:
             now = datetime.utcnow().isoformat()
             c.execute('''INSERT INTO entries (entry_type, content, tags, estimate_minutes, points, created_at, entry_date, last_modified)
                          VALUES (?,?,?,?,0,?,?,?)''',
                       ('brain', content, f'projekt,{project_name}', estimate or 30, now, today_str, now))
+        # Keep scheduled_date current so future runs don't duplicate
+        c.execute('UPDATE project_tasks SET scheduled_date=? WHERE id=?', (today_str, task_id))
     conn.commit()
     conn.close()
 
@@ -4446,7 +4455,7 @@ def render_planen_page():
     # Micro is now attached to the highlight's micro_action field
     today_highlight = next((r for r in rows if r[1] == "highlight"), None)
     has_micro       = bool(today_highlight and today_highlight[14])
-    brain_rows      = [r for r in rows if r[1] == "brain"]
+    brain_rows      = [r for r in rows if r[1] == "brain" and not r[9]]
     # Step 4 is "ready" when all brain tasks have at least a category or micro
     has_todo_setup  = bool(brain_rows) and all(r[14] or r[15] for r in brain_rows)
     today_str       = date.today().isoformat()
