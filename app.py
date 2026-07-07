@@ -148,8 +148,13 @@ HOUSEHOLD_TASKS = [
     {'key': 'declutter',     'icon': '📦', 'label': 'Schrank/Schublade ausmisten',                     'frequency': 'monthly', 'est_minutes': 25},
     {'key': 'smoke_detector','icon': '🔔', 'label': 'Rauchmelder testen',                              'frequency': 'monthly', 'est_minutes': 5},
 ]
-HOUSEHOLD_FREQUENCY_DAYS = {'daily': 1, 'weekly': 7, 'monthly': 30}
-HOUSEHOLD_FREQUENCY_LABELS = {'daily': '📅 Täglich', 'weekly': '🗓️ Wöchentlich', 'monthly': '📆 Monatlich'}
+HOUSEHOLD_FREQUENCY_DAYS = {'daily': 1, 'weekly': 7, 'monthly': 30, 'custom': None}
+HOUSEHOLD_FREQUENCY_LABELS = {
+    'daily':   '📅 Täglich',
+    'weekly':  '🗓️ Wöchentlich',
+    'monthly': '📆 Monatlich',
+    'custom':  '🔧 Eigener Rhythmus',
+}
 
 # ─── Season exclusive item keys (not shown in regular shop) ──────
 SEASON_EXCLUSIVE_KEYS = {
@@ -649,6 +654,20 @@ def init_db():
     )
     ''')
     c.execute('''
+    CREATE TABLE IF NOT EXISTS focus_blocks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        entry_id INTEGER,
+        task_name TEXT,
+        block_date TEXT,
+        started_at TEXT,
+        ended_at TEXT,
+        duration_seconds INTEGER DEFAULT 0,
+        round_number INTEGER DEFAULT 1,
+        steps_completed INTEGER DEFAULT 0,
+        total_steps INTEGER DEFAULT 0
+    )
+    ''')
+    c.execute('''
     CREATE TABLE IF NOT EXISTS task_analysis (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         entry_id INTEGER UNIQUE NOT NULL,
@@ -686,6 +705,23 @@ def init_db():
         created_at TEXT
     )
     ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS daily_training_exercises (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        plan_date TEXT NOT NULL,
+        track TEXT NOT NULL,
+        exercise_name TEXT NOT NULL,
+        sets INTEGER DEFAULT 3,
+        reps INTEGER DEFAULT 0,
+        hold_seconds INTEGER DEFAULT 0,
+        cue TEXT DEFAULT '',
+        why TEXT DEFAULT '',
+        difficulty INTEGER DEFAULT 5,
+        sort_order INTEGER DEFAULT 0,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(plan_date, track, exercise_name)
+    )
+    ''')
     # ─── Schlafrythmus & Routinen ───────────────────────────────
     c.execute('''
     CREATE TABLE IF NOT EXISTS routine_checks (
@@ -719,6 +755,19 @@ def init_db():
         UNIQUE(task_key, log_date)
     )
     ''')
+    c.execute('''
+    CREATE TABLE IF NOT EXISTS custom_household_tasks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_key TEXT UNIQUE NOT NULL,
+        icon TEXT DEFAULT '🏡',
+        label TEXT NOT NULL,
+        frequency TEXT DEFAULT 'weekly',
+        est_minutes INTEGER DEFAULT 15,
+        interval_days INTEGER DEFAULT 7,
+        active INTEGER DEFAULT 1,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
     # ─── Spontane Gedanken ───────────────────────────────────────
     c.execute('''
     CREATE TABLE IF NOT EXISTS spontaneous_thoughts (
@@ -741,6 +790,12 @@ def init_db():
         updated_at TEXT
     )
     ''')
+    # Migration: roter_faden column for projects
+    try:
+        c.execute("ALTER TABLE projects ADD COLUMN roter_faden TEXT DEFAULT ''")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -868,6 +923,33 @@ def toggle_step(step_id, done):
     conn.execute("UPDATE task_steps SET done=?, completed_at=? WHERE id=?", (int(done), ts, step_id))
     conn.commit()
     conn.close()
+
+
+def log_focus_block(entry_id, task_name, started_at, ended_at, duration_secs, round_num, steps_completed, total_steps):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        INSERT INTO focus_blocks
+            (entry_id, task_name, block_date, started_at, ended_at,
+             duration_seconds, round_number, steps_completed, total_steps)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (entry_id, task_name, date.today().isoformat(),
+          started_at, ended_at, int(duration_secs), round_num,
+          steps_completed, total_steps))
+    conn.commit()
+    conn.close()
+
+
+def get_focus_blocks(days=30):
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT block_date, task_name, duration_seconds, round_number,
+               steps_completed, total_steps, started_at
+        FROM focus_blocks
+        WHERE block_date >= date('now',?) ORDER BY started_at DESC
+    """, (f'-{days} days',)).fetchall()
+    conn.close()
+    return [{'date': r[0], 'task': r[1], 'secs': r[2], 'round': r[3],
+             'steps_done': r[4], 'steps_total': r[5], 'started': r[6]} for r in rows]
 
 
 def get_task_analysis(entry_id):
@@ -1604,18 +1686,21 @@ PROJECT_COLORS = ["#60a5fa", "#f97316", "#4ade80", "#a78bfa", "#f43f5e", "#fbbf2
 def get_projects():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT id, name, description, deadline, color, active, created_at, daily_minutes FROM projects ORDER BY created_at DESC')
+    c.execute('''SELECT id, name, description, deadline, color, active, created_at, daily_minutes,
+                        COALESCE(roter_faden,'')
+                 FROM projects ORDER BY created_at DESC''')
     rows = c.fetchall()
     conn.close()
     return rows
 
 
-def add_project(name, description, deadline, color, daily_minutes):
+def add_project(name, description, deadline, color, daily_minutes, roter_faden=''):
     now = datetime.utcnow().isoformat()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('INSERT INTO projects (name, description, deadline, color, active, created_at, daily_minutes) VALUES (?,?,?,?,1,?,?)',
-              (name, description, deadline, color, now, daily_minutes))
+    c.execute('''INSERT INTO projects (name, description, deadline, color, active, created_at, daily_minutes, roter_faden)
+                 VALUES (?,?,?,?,1,?,?,?)''',
+              (name, description, deadline, color, now, daily_minutes, roter_faden))
     pid = c.lastrowid
     conn.commit()
     conn.close()
@@ -1775,26 +1860,64 @@ def schedule_project_tasks(project_id):
 
 
 def sync_project_tasks():
-    """Auto-add today's scheduled project tasks to entries; also rolls forward past-due undone tasks."""
+    """Zieht GENAU EINE Aufgabe pro Projekt in den heutigen Tag — nie mehr, kein Flooding.
+    Nicht erledigte Tasks von gestern werden in den nächsten Tag geschoben, kein neuer Task geholt."""
     today_str = date.today().isoformat()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Include tasks scheduled for today OR overdue (scheduled_date < today, still undone)
-    c.execute('''SELECT pt.id, pt.content, pt.estimate_minutes, p.name
-                 FROM project_tasks pt JOIN projects p ON pt.project_id=p.id
-                 WHERE pt.scheduled_date <= ? AND pt.done=0 AND p.active=1
-                   AND (pt.scheduled_date IS NOT NULL AND pt.scheduled_date != '')''', (today_str,))
-    tasks = c.fetchall()
-    for task_id, content, estimate, project_name in tasks:
-        c.execute('SELECT COUNT(*) FROM entries WHERE entry_date=? AND content=? AND tags LIKE ?',
-                  (today_str, content, '%projekt%'))
-        if c.fetchone()[0] == 0:
+
+    projects = c.execute("SELECT id, name FROM projects WHERE active=1").fetchall()
+
+    for proj_id, proj_name in projects:
+        # 1. Bereits ein aktiver (undone) Task für heute in project_tasks?
+        today_task = c.execute(
+            "SELECT id, content, estimate_minutes FROM project_tasks WHERE project_id=? AND scheduled_date=? AND done=0",
+            (proj_id, today_str)
+        ).fetchone()
+
+        if not today_task:
+            # 2. Gibt es einen überfälligen undone Task? → auf heute verschieben (nicht duplizieren)
+            overdue = c.execute(
+                """SELECT id, content, estimate_minutes FROM project_tasks
+                   WHERE project_id=? AND done=0 AND scheduled_date IS NOT NULL AND scheduled_date != '' AND scheduled_date < ?
+                   ORDER BY scheduled_date, order_index LIMIT 1""",
+                (proj_id, today_str)
+            ).fetchone()
+
+            if overdue:
+                c.execute("UPDATE project_tasks SET scheduled_date=? WHERE id=?", (today_str, overdue[0]))
+                today_task = overdue
+            else:
+                # 3. Nächster ungeschedulter undone Task → für heute einplanen
+                next_task = c.execute(
+                    """SELECT id, content, estimate_minutes FROM project_tasks
+                       WHERE project_id=? AND done=0 AND (scheduled_date IS NULL OR scheduled_date='')
+                       ORDER BY order_index, id LIMIT 1""",
+                    (proj_id,)
+                ).fetchone()
+                if next_task:
+                    c.execute("UPDATE project_tasks SET scheduled_date=? WHERE id=?", (today_str, next_task[0]))
+                    today_task = next_task
+
+        if not today_task:
+            continue  # Alle Tasks erledigt
+
+        task_id, content, estimate = today_task
+
+        # 4. In entries eintragen — aber nur wenn noch nicht vorhanden (kein Duplicate)
+        already = c.execute(
+            "SELECT COUNT(*) FROM entries WHERE entry_date=? AND content=? AND tags LIKE '%projekt%'",
+            (today_str, content)
+        ).fetchone()[0]
+
+        if already == 0:
             now = datetime.utcnow().isoformat()
-            c.execute('''INSERT INTO entries (entry_type, content, tags, estimate_minutes, points, created_at, entry_date, last_modified)
-                         VALUES (?,?,?,?,0,?,?,?)''',
-                      ('brain', content, f'projekt,{project_name}', estimate or 30, now, today_str, now))
-        # Keep scheduled_date current so future runs don't duplicate
-        c.execute('UPDATE project_tasks SET scheduled_date=? WHERE id=?', (today_str, task_id))
+            c.execute(
+                """INSERT INTO entries (entry_type, content, tags, estimate_minutes, points, created_at, entry_date, last_modified)
+                   VALUES (?,?,?,?,0,?,?,?)""",
+                ('brain', content, f'projekt,{proj_name}', estimate or 30, now, today_str, now)
+            )
+
     conn.commit()
     conn.close()
 
@@ -1831,8 +1954,95 @@ def todays_skill_track():
     return 'skill_handstand' if wd in (0, 2, 4, 6) else 'skill_muscleup'
 
 
+def get_stored_training_plan():
+    """Liest den gespeicherten Trainingsplan für heute aus settings."""
+    raw = get_setting(f"training_plan_{date.today().isoformat()}")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    return None
+
+
+def save_training_plan(plan):
+    """Speichert den Trainingsplan für heute in settings."""
+    set_setting(f"training_plan_{date.today().isoformat()}", json.dumps(plan))
+
+
+def get_todays_auto_plan():
+    """Rotation-Plan ohne KI: wählt Tracks basierend auf Erholungszeiten."""
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT track, MAX(session_date) FROM cal_sessions GROUP BY track"
+    ).fetchall()
+    conn.close()
+
+    today = date.today()
+    last_date_map = {t: ld for t, ld in rows if ld}
+
+    def days_since(track):
+        if track not in last_date_map:
+            return 999
+        return (today - date.fromisoformat(last_date_map[track])).days
+
+    MIN_REST = {'push': 2, 'pull': 2, 'legs': 2, 'core': 1,
+                'skill_handstand': 1, 'skill_muscleup': 1}
+
+    ready = {t: days_since(t) for t in CAL_TRACKS if days_since(t) >= MIN_REST.get(t, 2)}
+
+    if not ready:
+        return {
+            'tracks': [], 'rest_day': True, 'source': 'auto',
+            'rationale': 'Alle Muskelgruppen brauchen noch Erholung — Ruhetag empfohlen.'
+        }
+
+    muscle_ready = sorted(
+        [t for t in ['push', 'pull', 'legs'] if t in ready],
+        key=lambda t: -ready[t]
+    )
+    picked = muscle_ready[:2]
+
+    if 'core' in ready:
+        picked.append('core')
+
+    skill_ready = sorted(
+        [t for t in ['skill_handstand', 'skill_muscleup'] if t in ready],
+        key=lambda t: -ready[t]
+    )
+    if skill_ready:
+        picked.append(skill_ready[0])
+
+    if not picked:
+        return {
+            'tracks': [], 'rest_day': True, 'source': 'auto',
+            'rationale': 'Nichts bereit — Ruhetag empfohlen.'
+        }
+
+    parts = [
+        f"{CAL_TRACKS[t]['label']} ({ready[t]}T Pause)" if ready[t] < 999
+        else f"{CAL_TRACKS[t]['label']} (erstes Mal)"
+        for t in picked
+    ]
+    return {
+        'tracks': picked,
+        'rest_day': False,
+        'source': 'auto',
+        'rationale': 'Auto-Rotation: ' + ', '.join(parts)
+    }
+
+
 def todays_cal_tracks():
-    return ['push', 'pull', 'legs', 'core', todays_skill_track()]
+    # KI-generierte Übungen haben Priorität
+    ki_tracks = get_daily_exercise_tracks()
+    if ki_tracks:
+        return ki_tracks
+    plan = get_stored_training_plan()
+    if plan is not None:
+        return plan.get('tracks', [])
+    auto = get_todays_auto_plan()
+    save_training_plan(auto)
+    return auto.get('tracks', [])
 
 
 def log_cal_session(track, sets_completed, best_reps, notes=''):
@@ -1922,6 +2132,81 @@ def get_cal_streak():
             'dates': date_set, 'total_sessions': total_sessions}
 
 
+# ── KI Daily Exercise Plan — DB Helpers ─────────────────────────
+
+def save_daily_exercises(date_str, tracks_data, meta=None):
+    """Speichert KI-generierte Übungen. tracks_data = [{'track':str, 'exercises':[...]}]"""
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM daily_training_exercises WHERE plan_date=?", (date_str,))
+    sort_order = 0
+    for td in tracks_data:
+        track = td.get('track', '')
+        for ex in td.get('exercises', []):
+            conn.execute("""
+                INSERT OR REPLACE INTO daily_training_exercises
+                (plan_date, track, exercise_name, sets, reps, hold_seconds, cue, why, difficulty, sort_order)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
+            """, (date_str, track, ex.get('name', ''), int(ex.get('sets', 3)),
+                  int(ex.get('reps', 0)), int(ex.get('hold_seconds', 0)),
+                  ex.get('cue', ''), ex.get('why', ''), int(ex.get('difficulty', 5)), sort_order))
+            sort_order += 1
+    conn.commit()
+    conn.close()
+    if meta:
+        save_training_plan({**meta, 'source': 'ki', 'rest_day': False,
+                            'tracks': [td['track'] for td in tracks_data if td.get('exercises')]})
+
+
+def get_daily_exercises(date_str=None):
+    """Gibt die KI-generierten Übungen des Tages zurück: {track: [exercise_dicts]}"""
+    date_str = date_str or date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute("""
+        SELECT id, track, exercise_name, sets, reps, hold_seconds, cue, why, difficulty
+        FROM daily_training_exercises WHERE plan_date=? ORDER BY sort_order, id
+    """, (date_str,)).fetchall()
+    conn.close()
+    result = {}
+    for row in rows:
+        track = row[1]
+        result.setdefault(track, []).append({
+            'id': row[0], 'name': row[2], 'sets': row[3], 'reps': row[4],
+            'hold_seconds': row[5], 'cue': row[6], 'why': row[7], 'difficulty': row[8]
+        })
+    return result
+
+
+def get_daily_exercise_tracks(date_str=None):
+    """Track-Keys für den heutigen KI-Plan."""
+    date_str = date_str or date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT DISTINCT track FROM daily_training_exercises WHERE plan_date=? ORDER BY rowid",
+        (date_str,)
+    ).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def log_ki_exercise(date_str, track, exercise_name, sets_done, reps_done,
+                    target_sets, target_reps, is_hold=False, notes=''):
+    """Loggt eine KI-geplante Übung in cal_sessions."""
+    clean = sets_done >= target_sets and reps_done >= target_reps
+    now = datetime.utcnow().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("""
+        INSERT INTO cal_sessions
+        (session_date, track, exercise_name, sets_completed, target_sets,
+         best_reps, target_reps, is_hold, clean, notes, created_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+    """, (date_str, track, exercise_name, sets_done, target_sets,
+          reps_done, target_reps, int(is_hold), int(clean), notes, now))
+    conn.commit()
+    conn.close()
+    _schedule_backup()
+    return clean
+
+
 def sync_daily_training():
     """Erstellt das heutige Trainings-Highlight im Kalender (einmal pro Tag, idempotent)."""
     today_str = date.today().isoformat()
@@ -1930,13 +2215,14 @@ def sync_daily_training():
     c.execute("SELECT COUNT(*) FROM entries WHERE entry_date=? AND tags LIKE '%training%'", (today_str,))
     if c.fetchone()[0] == 0:
         tracks = todays_cal_tracks()
-        names = [CAL_TRACKS[t]['label'] for t in tracks]
-        content = "🏋️ Calisthenics: " + ", ".join(names)
-        now = datetime.utcnow().isoformat()
-        c.execute('''INSERT INTO entries (entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, last_modified)
-                     VALUES (?,?,?,?,?,?,?,?,?)''',
-                  ('highlight', content, 'training', 9, 20, 0, now, today_str, now))
-        conn.commit()
+        if tracks:  # kein Eintrag an Ruhetagen
+            names = [CAL_TRACKS[t]['label'] for t in tracks]
+            content = "🏋️ Calisthenics: " + ", ".join(names)
+            now = datetime.utcnow().isoformat()
+            c.execute('''INSERT INTO entries (entry_type, content, tags, priority, estimate_minutes, points, created_at, entry_date, last_modified)
+                         VALUES (?,?,?,?,?,?,?,?,?)''',
+                      ('highlight', content, 'training', 9, 20, 0, now, today_str, now))
+            conn.commit()
     conn.close()
 
 
@@ -2219,6 +2505,173 @@ def unlog_household_task(task_key, log_date=None):
     _schedule_backup()
 
 
+def get_custom_household_tasks():
+    conn = sqlite3.connect(DB_PATH)
+    rows = conn.execute(
+        "SELECT task_key, icon, label, frequency, est_minutes, interval_days FROM custom_household_tasks WHERE active=1"
+    ).fetchall()
+    conn.close()
+    result = []
+    for r in rows:
+        freq = r[3]
+        interval = r[5] if freq == 'custom' else HOUSEHOLD_FREQUENCY_DAYS.get(freq, 7)
+        result.append({
+            'key': r[0], 'icon': r[1], 'label': r[2],
+            'frequency': freq, 'est_minutes': r[4],
+            'interval_days': interval, 'is_custom': True
+        })
+    return result
+
+
+def get_all_household_tasks():
+    """HOUSEHOLD_TASKS (built-in, ohne versteckte) + custom DB tasks."""
+    hidden = get_hidden_builtin_keys()
+    built_in = []
+    for t in HOUSEHOLD_TASKS:
+        if t['key'] in hidden:
+            continue
+        t2 = dict(t)
+        t2['interval_days'] = HOUSEHOLD_FREQUENCY_DAYS.get(t['frequency'], 7)
+        t2['is_custom'] = False
+        built_in.append(t2)
+    return built_in + get_custom_household_tasks()
+
+
+def add_custom_household_task(label, icon, frequency, est_minutes, interval_days=7):
+    key = f"custom_{label.lower().replace(' ','_')[:30]}_{int(datetime.utcnow().timestamp())}"
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute(
+        "INSERT OR IGNORE INTO custom_household_tasks (task_key, icon, label, frequency, est_minutes, interval_days) VALUES (?,?,?,?,?,?)",
+        (key, icon, label, frequency, est_minutes, interval_days)
+    )
+    conn.commit()
+    conn.close()
+
+
+def delete_custom_household_task(task_key):
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("UPDATE custom_household_tasks SET active=0 WHERE task_key=?", (task_key,))
+    conn.commit()
+    conn.close()
+
+
+def hide_builtin_household_task(task_key):
+    """Blendet eine eingebaute Haushaltsaufgabe aus (reversibel)."""
+    raw = get_setting('household_hidden_builtin') or '[]'
+    try:
+        hidden = set(json.loads(raw))
+    except Exception:
+        hidden = set()
+    hidden.add(task_key)
+    set_setting('household_hidden_builtin', json.dumps(list(hidden)))
+
+
+def show_builtin_household_task(task_key):
+    """Macht eine ausgeblendete built-in Aufgabe wieder sichtbar."""
+    raw = get_setting('household_hidden_builtin') or '[]'
+    try:
+        hidden = set(json.loads(raw))
+    except Exception:
+        hidden = set()
+    hidden.discard(task_key)
+    set_setting('household_hidden_builtin', json.dumps(list(hidden)))
+
+
+def get_hidden_builtin_keys():
+    raw = get_setting('household_hidden_builtin') or '[]'
+    try:
+        return set(json.loads(raw))
+    except Exception:
+        return set()
+
+
+def sync_household_to_entries():
+    """Zieht fällige Haushalt-Tasks smart in die To-Do-Liste.
+    Läuft exakt EINMAL pro Tag — gelöschte Tasks kommen nicht zurück, keine neuen werden nachgefüllt."""
+    today_str = date.today().isoformat()
+    today_d   = date.today()
+
+    # ── Einmal-pro-Tag-Guard: wenn heute schon gelaufen → sofort raus ──
+    done_key = f"household_sync_done_{today_str}"
+    if get_setting(done_key):
+        return
+
+    sync_key    = f"household_synced_{today_str}"
+    synced_raw  = get_setting(sync_key)
+    already_synced = set(json.loads(synced_raw)) if synced_raw else set()
+
+    conn = sqlite3.connect(DB_PATH)
+
+    # ── Tages-Auslastung messen (ohne Haushalt-Tasks) ──────────────
+    task_count = conn.execute(
+        "SELECT COUNT(*) FROM entries WHERE entry_date=? AND done=0 AND tags NOT LIKE '%haushalt%'",
+        (today_str,)
+    ).fetchone()[0]
+    total_est = conn.execute(
+        "SELECT COALESCE(SUM(estimate_minutes),0) FROM entries WHERE entry_date=? AND done=0 AND tags NOT LIKE '%haushalt%'",
+        (today_str,)
+    ).fetchone()[0]
+
+    # ── Schwellenwerte ──────────────────────────────────────────────
+    if task_count >= 10 or total_est >= 300:
+        conn.close()
+        return
+    elif task_count >= 6 or total_est >= 150:
+        max_tasks, max_minutes = 1, 10
+    elif task_count >= 3 or total_est >= 60:
+        max_tasks, max_minutes = 2, 20
+    else:
+        max_tasks, max_minutes = 3, 999
+
+    # ── Welche Haushalt-Tasks sind GERADE in entries (nicht gelöscht) ──
+    existing_now = {r[0] for r in conn.execute(
+        "SELECT content FROM entries WHERE entry_date=? AND tags LIKE '%haushalt%'",
+        (today_str,)
+    ).fetchall()}
+
+    # ── Letzte Erledigungen ────────────────────────────────────────
+    last_done_map = {r[0]: r[1] for r in conn.execute(
+        "SELECT task_key, MAX(log_date) FROM household_log GROUP BY task_key"
+    ).fetchall()}
+
+    conn.close()
+
+    all_tasks = get_all_household_tasks()
+    due_tasks = []
+    for t in all_tasks:
+        interval = t.get('interval_days') or HOUSEHOLD_FREQUENCY_DAYS.get(t['frequency'], 7) or 7
+        last = last_done_map.get(t['key'])
+        days_since = (today_d - date.fromisoformat(last)).days if last else interval + 1
+
+        if (days_since >= interval
+                and t['label'] not in existing_now      # nicht schon in entries
+                and t['label'] not in already_synced    # nicht schon mal heute gesynct (= user hat es gelöscht → nicht wiederholen)
+                and t['est_minutes'] <= max_minutes):
+            due_tasks.append((max(0, days_since - interval), t))
+
+    due_tasks.sort(key=lambda x: x[0], reverse=True)
+
+    newly_added = []
+    if due_tasks:
+        conn2 = sqlite3.connect(DB_PATH)
+        for _, t in due_tasks[:max_tasks]:
+            conn2.execute("""
+                INSERT INTO entries (entry_type, content, tags, estimate_minutes, entry_date, done)
+                VALUES ('micro', ?, 'haushalt', ?, ?, 0)
+            """, (t['label'], t['est_minutes'], today_str))
+            newly_added.append(t['label'])
+        conn2.commit()
+        conn2.close()
+
+    # ── Sync-Tracking aktualisieren + Done-Guard setzen ────────────
+    if newly_added:
+        updated = already_synced | set(newly_added)
+        set_setting(sync_key, json.dumps(list(updated), ensure_ascii=False))
+
+    # Guard: sync läuft heute nicht nochmal (verhindert Nachfüllen wenn Tasks gelöscht werden)
+    set_setting(done_key, "1")
+
+
 def get_household_status():
     """Für jede Haushaltsaufgabe: zuletzt erledigt, Tage seitdem, fällig/überfällig, Dringlichkeit."""
     today = date.today()
@@ -2228,14 +2681,14 @@ def get_household_status():
     last_done_map = {k: v for k, v in rows}
 
     out = []
-    for t in HOUSEHOLD_TASKS:
+    for t in get_all_household_tasks():
         last_done = last_done_map.get(t['key'])
-        interval = HOUSEHOLD_FREQUENCY_DAYS[t['frequency']]
+        interval = t.get('interval_days') or HOUSEHOLD_FREQUENCY_DAYS.get(t['frequency'], 7) or 7
         if last_done:
             days_since = (today - date.fromisoformat(last_done)).days
         else:
-            days_since = interval * 3  # nie gemacht -> klar überfällig, aber kein absurder Wert
-        due = days_since >= interval
+            days_since = interval * 3
+        due     = days_since >= interval
         overdue = days_since >= interval * 1.5
         urgency = min(1.5, days_since / interval) if interval else 0
         out.append({
@@ -2252,14 +2705,14 @@ def household_clean_score():
         return 100
     freshness_vals = []
     for t in status:
-        interval = HOUSEHOLD_FREQUENCY_DAYS[t['frequency']]
+        interval = t.get('interval_days') or HOUSEHOLD_FREQUENCY_DAYS.get(t['frequency'], 7) or 7
         freshness = max(0.0, 1 - t['days_since'] / (interval * 1.5))
         freshness_vals.append(freshness)
     return int(round(sum(freshness_vals) / len(freshness_vals) * 100))
 
 
 def get_household_daily_streak():
-    daily_keys = [t['key'] for t in HOUSEHOLD_TASKS if t['frequency'] == 'daily']
+    daily_keys = [t['key'] for t in get_all_household_tasks() if t['frequency'] == 'daily']
     if not daily_keys:
         return {'current': 0, 'longest': 0}
     placeholders = ",".join("?" * len(daily_keys))
@@ -3331,6 +3784,841 @@ JSON-Format:
         return _parse_ki_json(resp.choices[0].message.content)
     except Exception as e:
         return {"error": str(e)}
+
+
+def ki_daily_training_plan(api_key):
+    """KI erstellt tagesoptimierten Trainingsplan basierend auf echter Session-Historie."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        today = date.today()
+
+        conn = sqlite3.connect(DB_PATH)
+        sessions = conn.execute("""
+            SELECT session_date, track, sets_completed, target_sets,
+                   best_reps, target_reps, is_hold, clean
+            FROM cal_sessions WHERE session_date >= ?
+            ORDER BY session_date DESC, track
+        """, ((today - timedelta(days=14)).isoformat(),)).fetchall()
+        progress_rows = conn.execute(
+            "SELECT track, current_level, consecutive_clean, best_reps FROM cal_progress"
+        ).fetchall()
+        conn.close()
+
+        if not sessions:
+            auto = get_todays_auto_plan()
+            auto['source'] = 'auto'
+            return auto
+
+        session_lines = [
+            f"{s[0]} | {CAL_TRACKS.get(s[1], {}).get('label', s[1])}: "
+            f"{s[2]}/{s[3]} Sätze, {s[4]}/{s[5]} {'Sek' if s[6] else 'Wdh'} "
+            f"{'✅' if s[7] else '⚠️'}"
+            for s in sessions
+        ]
+        progress_lines = [
+            f"{CAL_TRACKS.get(p[0], {}).get('label', p[0])}: Stufe {p[1]+1}, "
+            f"{p[2]}x clean in Folge, Best: {p[3]}"
+            for p in progress_rows
+        ]
+        track_options = ', '.join(CAL_TRACKS.keys())
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[{
+                "role": "system",
+                "content": (
+                    f"Du bist ein erfahrener Calisthenics-Coach. Heute: {today.isoformat()} ({WOCHENTAGE[today.weekday()]}).\n"
+                    f"Verfügbare Track-Keys: {track_options}\n"
+                    "Regel: mindestens 48h Pause zwischen Muskelgruppen (push/pull/legs), 24h für core/skill.\n"
+                    "Plane 2–4 Tracks pro Tag — kein Fullbody jeden Tag!\n"
+                    "Antworte NUR mit validem JSON."
+                )
+            }, {
+                "role": "user",
+                "content": (
+                    "Trainings-Historie (letzte 14 Tage):\n"
+                    + "\n".join(session_lines)
+                    + "\n\nAktueller Fortschritt:\n"
+                    + "\n".join(progress_lines)
+                    + '\n\nPlan für heute als JSON:\n'
+                    '{\n'
+                    '  "tracks": ["push", "core", "skill_handstand"],\n'
+                    '  "rest_day": false,\n'
+                    '  "rationale": "Begründung auf Deutsch warum genau diese Tracks heute",\n'
+                    '  "tip": "Konkreter Tipp für heute (optional)"\n'
+                    '}'
+                )
+            }],
+            max_tokens=500,
+            stream=False
+        )
+        result = _parse_ki_json(resp.choices[0].message.content)
+        valid_tracks = [t for t in result.get('tracks', []) if t in CAL_TRACKS]
+
+        if not valid_tracks and not result.get('rest_day'):
+            auto = get_todays_auto_plan()
+            auto['source'] = 'auto'
+            return auto
+
+        return {
+            'tracks': valid_tracks,
+            'rest_day': bool(result.get('rest_day')),
+            'rationale': result.get('rationale', ''),
+            'tip': result.get('tip', ''),
+            'source': 'ki'
+        }
+    except Exception as e:
+        auto = get_todays_auto_plan()
+        auto['source'] = 'auto'
+        return auto
+
+
+def update_todays_training_entry(tracks):
+    """Aktualisiert den Trainings-Eintrag für heute wenn der Plan sich ändert."""
+    today_str = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    if tracks:
+        names = [CAL_TRACKS.get(t, {}).get('label', t) for t in tracks]
+        content = "🏋️ Calisthenics: " + ", ".join(names)
+        conn.execute(
+            "UPDATE entries SET content=? WHERE entry_date=? AND tags LIKE '%training%' AND done=0",
+            (content, today_str)
+        )
+    else:
+        conn.execute(
+            "DELETE FROM entries WHERE entry_date=? AND tags LIKE '%training%' AND done=0",
+            (today_str,)
+        )
+    conn.commit()
+    conn.close()
+
+
+# ─── KI Elite Training Coach — vollständige Übungs-Engine ──────────────
+
+_KI_TRAINING_SYSTEM = """Du bist ein Elite-Calisthenics-Coach mit jahrzehntelangem Wissen aus Sportwissenschaft, Biomechanik und den besten Trainingsprogrammen weltweit (Gymnastics Bodies, Convict Conditioning, RedDeltaProject, FitnessFAQs, wissenschaftliche Studien zu Kraft, Progression und Recovery).
+
+DEINE AUFGABE: Erstelle täglich den PERFEKTEN, hochpersonalisierten Trainingsplan — basierend auf echten Leistungsdaten des Nutzers. Kein Copy-Paste von Standardplänen.
+
+══════════════════════════════════════════
+KOMPLETTE EXERCISE LIBRARY
+══════════════════════════════════════════
+
+PUSH (Brust / Trizeps / Schulter):
+Regression: Wall Push-up (Wand, 45°) → Elevated Push-up (Tisch) → Elevated Push-up (Stuhl) → Knee Push-up → Regular Push-up → Wide Push-up → Close (Diamond) Push-up → Decline Push-up → Archer Push-up → Pseudo Planche Push-up → Pike Push-up → Decline Pike Push-up → Wall HSPU (Fußhöhe) → Box HSPU → HSPU Negativ (5s) → Handstand Push-up → Strict Deep HSPU
+Hilfsübungen: Dip Negativ, Ring Push-up, Explosive Push-up, Shoulder Tap Plank
+
+PULL (Rücken / Bizeps):
+Regression: Dead Hang (passiv, 10s) → Active Hang (Schulterblätter aktiv) → Scapular Pull-up → Inverted Row (Tischkante) → Ring Row (steil) → Ring Row (flach = horizontal) → Chin-up Negativ (5s) → Pull-up Negativ (5s) → Band-Chin-up → Band-Pull-up → Chin-up → Pull-up → Enger Pull-up → Archer Pull-up → L-Sit Pull-up → One-Arm Negativ → One-Arm Pull-up
+Hilfsübungen: Face Pull (Band), Scapular Shrug, Chest-to-Bar Pull-up
+
+LEGS (Beine / Gesäß):
+Regression: Box Squat (hoch) → Box Squat (tief) → Regular Squat → Pause Squat (2s unten) → Step-up → Reverse Lunge → Forward Lunge → Split Squat → Bulgarian Split Squat → Shrimp Squat (assistiert, Stuhl) → Shrimp Squat (frei) → Pistol Squat (Box hoch) → Pistol Squat (Box tief) → Pistol Squat (assistiert) → Pistol Squat → Dragon Squat
+Nordic Curl Track: Nordic Curl Negativ (5s) → Nordic Curl Negativ (8s) → Partial Nordic Curl → Nordic Curl
+Hilfsübungen: Glute Bridge, Single-Leg Glute Bridge, Wall Sit, Jump Squat, Sissy Squat, Calf Raise
+
+CORE (Rumpf):
+Regression: Dead Bug (Anfänger) → Dead Bug (gestreckt) → Hollow Body Hold (gebeugt) → Hollow Body Hold (gestreckt) → Knee Plank → Plank (standard) → Plank mit Arm-Heben → Side Plank → Copenhagen Plank → Liegende Beinheber (gebeugt) → Liegende Beinheber (gestreckt) → Hängende Knieheber → Hängende L-Sit-Hold → Hängende Beinheber → Tuck L-Sit (Boden) → L-Sit (Boden) → L-Sit (Parallel Bars) → Ab Wheel (kniend) → Ab Wheel (Füße) → Dragon Flag Negativ → Dragon Flag → Front Lever Tuck → Front Lever
+Hilfsübungen: V-Up, Bicycle Crunch, Toe Touch, McGill Big 3
+
+HANDSTAND (Skill):
+Wrist Mobility & Prep (täglich) → Frog Stand (5s) → Crow Pose (5-10s) → Headstand (an Wand) → Wand-Handstand Bauch zur Wand (30s) → Wand-Handstand Rücken zur Wand → Kick-up Training (10 Versuche) → Fußabnehmen von Wand (1-2s) → Freier HS (kurz) → Freier HS 5s → HS Walk → HS Push-up
+Hilfsübungen: Fußabnehmen Übung, Shoulder Tap HS
+
+MUSCLE-UP (Skill):
+Explosive Pull-up (Brust zur Stange) → Dip (tief, 90°) → Dip Negativ → L-Sit Dip → Bar Muscle-up mit Band → Bar Muscle-up Negativ → Bar Muscle-up (Schwung) → Bar Muscle-up (kipping clean) → Bar Muscle-up (strict)
+Hilfsübungen: High Pull, Transition Drill, Ring Muscle-up
+
+MOBILITY & RECOVERY (für Ruhetage oder als Warm-up):
+Cat-Cow, Thorax-Rotation, Hip 90/90, Deep Squat Hold, Pigeon Pose, Shoulder CARs, Band Dislocates, Wrist Circles, Foam Rolling
+
+══════════════════════════════════════════
+TRAININGS-PRINZIPIEN (immer anwenden!)
+══════════════════════════════════════════
+
+1. PROGRESSION (wenn clean geschafft):
+   - 2x hintereinander alle Sätze/Reps clean → NÄCHSTE Stufe ODER +1 Rep/Set
+   - Lang stagniert trotz clean → Volume-Phase (mehr Sätze) ODER Intensitätssteigerung
+
+2. REGRESSION (wenn nicht clean):
+   - < 60% der Ziel-Reps → 1 Stufe zurück in der Progression
+   - < 80% der Ziel-Reps → gleiche Übung, Reps reduzieren (-2 bis -3)
+   - Mehrfach nicht clean → 2 Stufen zurück + gezielte Hilfsübung
+   - IMMER erklären WARUM die Regression zum Ziel führt
+
+3. RECOVERY (Recovery-Regeln):
+   - Push/Pull/Legs: mindestens 48h Pause
+   - Core/Skills: 24h Pause ausreichend
+   - Totale Erschöpfung in Notes erkannt: leichtere Alternativübung
+
+4. REIHENFOLGE pro Session:
+   - Skill zuerst (Technik braucht frischen Kopf)
+   - Dann Kraft (Push/Pull/Legs)
+   - Core zuletzt
+
+5. SETS & REPS:
+   - Anfänger: 3 Sätze (fokussierter)
+   - Zielreps: nicht zu hoch (lieber 8 saubere als 15 schlechte)
+   - Bei Holds: in Sekunden angeben (hold_seconds)
+
+6. ADHS-COACHING:
+   - Kurze, klare Anweisungen (1 Satz max)
+   - Concrete cues die SOFORT umsetzbar sind
+   - Sessions 30-45 Minuten max.
+
+Antworte AUSSCHLIESSLICH mit validem JSON. Kein Text davor oder danach."""
+
+
+def ki_generate_daily_exercises(api_key):
+    """Elite-KI erstellt tagesaktuellen, vollständig personalisierten Trainingsplan."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        today = date.today()
+
+        conn = sqlite3.connect(DB_PATH)
+
+        # Letzte 30 Tage Sessions (gesamte Performance-Historie)
+        sessions = conn.execute("""
+            SELECT session_date, track, exercise_name, sets_completed, target_sets,
+                   best_reps, target_reps, is_hold, clean, notes
+            FROM cal_sessions
+            WHERE session_date >= ?
+            ORDER BY session_date DESC, id
+        """, ((today - timedelta(days=30)).isoformat(),)).fetchall()
+
+        # Letzter KI-Plan (was war geplant?)
+        last_plan_rows = conn.execute("""
+            SELECT plan_date, track, exercise_name, sets, reps, hold_seconds
+            FROM daily_training_exercises
+            WHERE plan_date >= ?
+            ORDER BY plan_date DESC, sort_order
+        """, ((today - timedelta(days=7)).isoformat(),)).fetchall()
+
+        conn.close()
+
+        # Sessions formatieren
+        session_lines = []
+        for s in sessions:
+            unit = 'Sek' if s[7] else 'Wdh'
+            clean_str = 'CLEAN' if s[8] else 'NICHT CLEAN'
+            note = f" (Notiz: {s[9]})" if s[9] else ""
+            pct = round(s[3] / s[4] * 100) if s[4] else 0
+            reps_pct = round(s[5] / s[6] * 100) if s[6] else 0
+            session_lines.append(
+                f"{s[0]} | {s[1]}: \"{s[2]}\" | "
+                f"Sätze: {s[3]}/{s[4]} ({pct}%) | "
+                f"Beste Leistung: {s[5]}/{s[6]} {unit} ({reps_pct}%) | "
+                f"{clean_str}{note}"
+            )
+
+        # Geplante Pläne formatieren
+        plan_lines = []
+        for p in last_plan_rows:
+            unit = 'Sek' if p[5] > 0 else 'Wdh'
+            val = p[5] if p[5] > 0 else p[4]
+            plan_lines.append(f"{p[0]} | {p[1]}: \"{p[2]}\" — Ziel: {p[3]} Sätze × {val} {unit}")
+
+        session_text = "\n".join(session_lines) if session_lines else "Noch keine Sessions — erster Trainingstag!"
+        plan_text = "\n".join(plan_lines) if plan_lines else "Noch kein vorheriger Plan vorhanden."
+
+        # Tage-seit-letztem-Training pro Track ermitteln
+        recovery_lines = []
+        for track in CAL_TRACKS:
+            last = max((s[0] for s in sessions if s[1] == track), default=None)
+            if last:
+                days = (today - date.fromisoformat(last)).days
+                recovery_lines.append(f"{track}: zuletzt {last} ({days} Tag(e) Pause)")
+            else:
+                recovery_lines.append(f"{track}: noch nie trainiert")
+
+        user_prompt = (
+            f"Heute ist {today.isoformat()} ({WOCHENTAGE[today.weekday()]}).\n\n"
+            f"RECOVERY-STATUS:\n" + "\n".join(recovery_lines) + "\n\n"
+            f"TRAININGS-PERFORMANCE (letzte 30 Tage):\n{session_text}\n\n"
+            f"LETZTER GEPLANTER PLAN (letzten 7 Tage):\n{plan_text}\n\n"
+            "AUFGABE:\n"
+            "1. Analysiere was clean war und was nicht\n"
+            "2. Erkenne wer auf Recovery-Pause ist (48h Push/Pull/Legs, 24h Core/Skill)\n"
+            "3. Erstelle den OPTIMALEN Plan für heute\n"
+            "4. Wähle GENAU die richtige Schwierigkeit — lieber einfacher und perfekt als zu schwer und clean nicht möglich\n\n"
+            "JSON-Format:\n"
+            "{\n"
+            '  "rest_day": false,\n'
+            '  "day_rationale": "1-2 Sätze: Warum heute genau diese Übungen und Schwierigkeit",\n'
+            '  "weekly_focus": "Hauptziel dieser Woche (z.B. Plank 40s stabilisieren)",\n'
+            '  "tip": "1 konkreter Coaching-Tipp für heute",\n'
+            '  "tracks": [\n'
+            '    {\n'
+            '      "track": "core",\n'
+            '      "exercises": [\n'
+            '        {\n'
+            '          "name": "Plank",\n'
+            '          "sets": 3,\n'
+            '          "reps": 0,\n'
+            '          "hold_seconds": 30,\n'
+            '          "cue": "Bauch fest, Gesäß anspannen, Hüfte nicht durchhängen lassen",\n'
+            '          "why": "Letztes Mal 25s geschafft — heute 30s als nächsten Schritt anpeilen",\n'
+            '          "difficulty": 4\n'
+            '        }\n'
+            '      ]\n'
+            '    }\n'
+            '  ]\n'
+            "}\n\n"
+            "WICHTIG:\n"
+            "- reps=0 und hold_seconds>0 wenn es eine Halteübung ist\n"
+            "- Handstand NUR wenn Plank 30s+ stabil clean\n"
+            "- Bei Erstsessions: IMMER mit Regression starten (Anfänger-Variante)\n"
+            "- Max 4 Tracks pro Tag, 1-2 Übungen pro Track\n"
+            "- difficulty 1-10 (1=sehr leicht, 10=extrem)\n"
+            "- Tracks: push / pull / legs / core / skill_handstand / skill_muscleup"
+        )
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": _KI_TRAINING_SYSTEM},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=2000,
+            stream=False
+        )
+        result = _parse_ki_json(resp.choices[0].message.content)
+
+        if result.get('rest_day'):
+            return {'rest_day': True, 'tracks': [],
+                    'day_rationale': result.get('day_rationale', 'KI empfiehlt Ruhetag.'),
+                    'tip': result.get('tip', '')}
+
+        tracks_data = []
+        for td in result.get('tracks', []):
+            track = td.get('track', '')
+            exercises = []
+            for ex in td.get('exercises', []):
+                exercises.append({
+                    'name': ex.get('name', ''),
+                    'sets': max(1, int(ex.get('sets', 3))),
+                    'reps': max(0, int(ex.get('reps', 0))),
+                    'hold_seconds': max(0, int(ex.get('hold_seconds', 0))),
+                    'cue': ex.get('cue', ''),
+                    'why': ex.get('why', ''),
+                    'difficulty': max(1, min(10, int(ex.get('difficulty', 5))))
+                })
+            if exercises:
+                tracks_data.append({'track': track, 'exercises': exercises})
+
+        if not tracks_data:
+            return None
+
+        return {
+            'rest_day': False,
+            'tracks': tracks_data,
+            'day_rationale': result.get('day_rationale', ''),
+            'weekly_focus': result.get('weekly_focus', ''),
+            'tip': result.get('tip', '')
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def ki_training_briefing(api_key):
+    """Erstellt ein tiefes, ausführliches KI-Trainingsbriefing mit Zielen, Meilensteinen und Übungserklärungen."""
+    today_str = date.today().isoformat()
+    cache_key = f"training_briefing_{today_str}"
+    cached = get_setting(cache_key)
+    if cached:
+        try:
+            return json.loads(cached)
+        except Exception:
+            pass
+
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        today = date.today()
+
+        conn = sqlite3.connect(DB_PATH)
+        sessions = conn.execute("""
+            SELECT session_date, track, exercise_name, sets_completed, target_sets,
+                   best_reps, target_reps, is_hold, clean, notes
+            FROM cal_sessions WHERE session_date >= ?
+            ORDER BY session_date DESC, id
+        """, ((today - timedelta(days=30)).isoformat(),)).fetchall()
+
+        ki_exercises_rows = conn.execute("""
+            SELECT track, exercise_name, sets, reps, hold_seconds, cue, why, difficulty
+            FROM daily_training_exercises WHERE plan_date=? ORDER BY sort_order, id
+        """, (today_str,)).fetchall()
+        conn.close()
+
+        prog = get_cal_progress()
+        streak = get_cal_streak()
+
+        # Heutige Übungen zusammenfassen
+        ex_lines = []
+        for r in ki_exercises_rows:
+            track_label = CAL_TRACKS.get(r[0], {}).get('label', r[0])
+            unit = f"{r[4]}s Hold" if r[4] > 0 else f"{r[3]} Wdh"
+            ex_lines.append(f"- [{track_label}] {r[1]}: {r[2]} Sätze × {unit} | Schwierigkeit: {r[7]}/10 | Cue: {r[5]} | KI-Begründung: {r[6]}")
+
+        # Progression pro Track
+        prog_lines = []
+        for t, p in prog.items():
+            ex = get_cal_exercise(t, p['level'], p['bonus'])
+            prog_lines.append(
+                f"- {CAL_TRACKS[t]['label']}: Level {p['level']+1}/{len(CAL_TRACKS[t]['levels'])} "
+                f"→ aktuelle Übung: {ex['name']}"
+            )
+
+        # Recovery Status
+        recovery_lines = []
+        for track in CAL_TRACKS:
+            last = max((s[0] for s in sessions if s[1] == track), default=None)
+            days = (today - date.fromisoformat(last)).days if last else None
+            recovery_lines.append(f"- {CAL_TRACKS[track]['label']}: {'noch nie trainiert' if not last else f'zuletzt {last} ({days}d Pause)'}")
+
+        # Letzte 10 Sessions
+        sess_lines = []
+        for s in sessions[:15]:
+            unit = 'Sek' if s[7] else 'Wdh'
+            sess_lines.append(
+                f"- {s[0]} [{CAL_TRACKS.get(s[1],{}).get('label',s[1])}] {s[2]}: "
+                f"{s[3]}/{s[4]} Sätze, {s[5]}/{s[6]} {unit} {'✅' if s[8] else '❌'}"
+                + (f" | Notiz: {s[9]}" if s[9] else "")
+            )
+
+        ex_block = "\n".join(ex_lines) if ex_lines else "Noch kein KI-Plan für heute — erstelle zuerst einen KI-Plan."
+        prog_block = "\n".join(prog_lines)
+        rec_block = "\n".join(recovery_lines)
+        sess_block = "\n".join(sess_lines) if sess_lines else "Noch keine Sessions."
+
+        system_prompt = (
+            "Du bist Angelo's persönlicher Elite-Calisthenics-Coach. "
+            "Du kennst seine gesamte Trainingsgeschichte und redest direkt, ehrlich und motivierend mit ihm. "
+            "Kein generisches Fitnessbuch-Blabla — alles konkret auf seine echten Daten bezogen. "
+            "Antworte AUSSCHLIESSLICH mit validem JSON."
+        )
+
+        user_prompt = f"""Heute: {today_str} | Streak: {streak['current']} Tage | Gesamt: {streak['total_sessions']} Einheiten
+
+PROGRESSION PRO TRACK:
+{prog_block}
+
+RECOVERY STATUS:
+{rec_block}
+
+HEUTIGE ÜBUNGEN (KI-Plan):
+{ex_block}
+
+LETZTE 15 SESSIONS:
+{sess_block}
+
+Erstelle jetzt ein detailliertes, ausführliches Trainingsbriefing. JSON-Format:
+{{
+  "ueberziel": "Das übergeordnete langfristige Calisthenics-Ziel basierend auf seinem aktuellen Level (2-3 Sätze, konkret und persönlich)",
+  "meilensteine": [
+    {{
+      "name": "Meilenstein-Name (kurz)",
+      "status": "erreicht|in_arbeit|offen",
+      "beschreibung": "Was dieser Meilenstein bedeutet und warum er wichtig ist",
+      "stand": "Aktueller Stand bezogen auf seine echten Daten"
+    }}
+  ],
+  "ziel_heute": "Das konkrete Ziel für heute in 1 Satz",
+  "warum_heute": "Warum genau dieses Ziel heute? Recovery, Progression-Timing, Datenbegründung — 3-4 Sätze",
+  "verbindung_zum_ziel": "Wie führen die heutigen Übungen direkt zum übergeordneten Ziel? Konkrete mechanische und physiologische Erklärung — 3-4 Sätze",
+  "uebungen": [
+    {{
+      "name": "Übungsname exakt wie im Plan",
+      "track": "Track-Label",
+      "was_trainiert": "Welche Muskeln/Bewegungsmuster/Fähigkeiten werden trainiert (detailliert)",
+      "warum_jetzt": "Warum genau diese Übung auf diesem Level jetzt — bezogen auf seine Progressionsdaten",
+      "biomechanik": "Kurze biomechanische Erklärung: was passiert im Körper während dieser Übung",
+      "langzeitwirkung": "Wie baut diese Übung die Grundlage für den nächsten Progressionsschritt und das Gesamtziel",
+      "mental_cue": "1 mentaler Fokus-Satz für die Ausführung"
+    }}
+  ],
+  "coach_wort": "1 persönliches, ehrliches Coach-Wort für heute — kein Motivations-Bullshit, sondern was Angelo wirklich hören muss"
+}}
+
+WICHTIG: Mindestens 3 Meilensteine. Für jede heutige Übung ein Eintrag in 'uebungen'. Sei ausführlich und konkret, keine Allgemeinplätze."""
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=3000,
+            stream=False
+        )
+        result = _parse_ki_json(resp.choices[0].message.content)
+        if result and not result.get('error'):
+            set_setting(cache_key, json.dumps(result, ensure_ascii=False))
+        return result
+    except Exception as e:
+        return {'error': str(e)}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# KI ZENTRAL-GEHIRN — Tages-Briefing, Coach-Leiste, proaktive Anpassung
+# ══════════════════════════════════════════════════════════════════════
+
+_KI_BRIEFING_SYSTEM = """Du bist Angelo's persönlicher ADHS-Coach. Du kennst ihn, du kennst seine Daten, und du redest direkt mit ihm — kein Therapeuten-Speak, kein Datendump.
+
+DEINE AUFGABE: Analysiere alle vorliegenden Daten und erstelle ein ehrliches, personalisiertes Tages-Briefing. Du triffst Entscheidungen FÜR ihn — weniger Entscheidungen = weniger ADHS-Overhead.
+
+ENERGIE-BERECHNUNG (energy_level 1–5, Daten als quality_pct 0-100):
+- quality_pct ≤ 40 (schlechter Schlaf) → max 2
+- quality_pct 41-60 (mittelmäßig) → 3
+- quality_pct 61-80 (gut) → 4
+- quality_pct > 80 (sehr gut) → 5
+- Kein Schlafeintrag für heute → 3 (Annahme)
+- Mehrere schlechte Nächte hintereinander → −1 kumulativ
+
+FOCUS_MODE:
+- energy 1–2 → "recovery" (nur leichte Tasks, kein komplexes Denken, kürzere Sessions)
+- energy 3 → "light" (mittlere Aufgaben, kurze Sessions à 25 min)
+- energy 4 → "normal" (normaler produktiver Tag)
+- energy 5 → "deep" (perfekt für komplexe oder kreative Aufgaben, 50-min-Blöcke)
+
+TASK-PRIORISIERUNG:
+- Energie niedrig → einfachere Tasks ZUERST, komplexe Tasks hinten oder auf morgen
+- Energie hoch → wichtigste und schwerste Task ZUERST (eat the frog)
+- Berücksichtige Tags und Deadlines aus den Task-Daten
+
+DAY_MESSAGE Regeln:
+- Maximal 2 kurze Sätze
+- Du-Form, direkt, wie ein guter Kumpel der Trainer ist
+- Ehrlich: wenn Schlaf schlecht war → das ANSPRECHEN, nicht ignorieren
+- Kein Motivations-Bla-Bla ("Du schaffst das!")
+- Konkret was heute passiert: "Heute light — 2 Tasks, dann Schluss."
+
+ADAPTATIONS (max 3, nur wenn wirklich abweichend von Standard):
+- Konkrete, umsetzbare Anpassungen
+- Beispiel: "Training heute leichter ansetzen — zu wenig Schlaf für volle Intensität"
+- Beispiel: "Fokus-Session auf 25 min kürzen, dann kurze Pause"
+- Beispiel: "Task 'X' auf morgen — heute reicht die Energie nicht"
+- LEER lassen wenn normaler Tag ohne besondere Anpassungen
+
+Antworte NUR mit validem JSON, kein Text davor oder danach:
+{
+  "energy_level": 3,
+  "focus_mode": "normal",
+  "day_message": "Direkte 2-Satz-Nachricht an Angelo",
+  "top_priority": "Konkret welche Aufgabe ZUERST — leer wenn keine Tasks vorhanden",
+  "adaptations": ["Anpassung 1", "Anpassung 2"],
+  "task_order": [id1, id2, id3],
+  "training_note": "1 Satz zur heutigen Training-Empfehlung basierend auf Energie — leer wenn kein Training"
+}"""
+
+
+def save_ki_briefing(data):
+    set_setting(f"ki_briefing_{date.today().isoformat()}", json.dumps(data, ensure_ascii=False))
+
+
+def get_ki_briefing():
+    raw = get_setting(f"ki_briefing_{date.today().isoformat()}")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    return None
+
+
+def ki_morning_briefing(api_key):
+    """Zentrale Tages-Analyse: alle Daten → persönlicher Coach-Plan für den ganzen Tag."""
+    try:
+        from openai import OpenAI as _OpenAI
+        client = _OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        today = date.today()
+        today_str = today.isoformat()
+
+        conn = sqlite3.connect(DB_PATH)
+
+        # Schlaf heute & letzte 7 Tage (quality_pct=0-100, wake_time)
+        sleep_today = conn.execute(
+            "SELECT quality_pct, bedtime, wake_time FROM sleep_logs WHERE log_date=? LIMIT 1",
+            (today_str,)
+        ).fetchone()
+        sleep_hist = conn.execute(
+            "SELECT log_date, quality_pct, bedtime, wake_time FROM sleep_logs WHERE log_date>=? ORDER BY log_date DESC",
+            ((today - timedelta(days=7)).isoformat(),)
+        ).fetchall()
+
+        # Tasks heute
+        brain_tasks = conn.execute(
+            """SELECT id, content, priority, estimate_minutes, tags, deadline
+               FROM entries WHERE entry_date=? AND entry_type='brain' AND done=0
+               ORDER BY priority DESC""",
+            (today_str,)
+        ).fetchall()
+
+        # Habit Streaks
+        habits = conn.execute("SELECT id, name, icon FROM habits LIMIT 10").fetchall()
+        habit_streaks = []
+        for h in habits:
+            streak = conn.execute(
+                "SELECT COUNT(*) FROM habit_logs WHERE habit_id=? AND log_date>=?",
+                (h[0], (today - timedelta(days=7)).isoformat())
+            ).fetchone()[0]
+            habit_streaks.append((h[1], h[2], streak))
+
+        # Training heute
+        ki_exercises = conn.execute(
+            "SELECT track, exercise_name, sets, reps, hold_seconds FROM daily_training_exercises WHERE plan_date=?",
+            (today_str,)
+        ).fetchall()
+        training_plan_raw = get_setting(f"training_plan_{today_str}")
+        training_plan = json.loads(training_plan_raw) if training_plan_raw else None
+
+        # Letzte Trainingssession (gestern)
+        yesterday_str = (today - timedelta(days=1)).isoformat()
+        yesterday_sessions = conn.execute(
+            "SELECT track, exercise_name, clean FROM cal_sessions WHERE session_date=?",
+            (yesterday_str,)
+        ).fetchall()
+
+        conn.close()
+
+        # ── Context aufbauen ──
+        if sleep_today:
+            q_pct, bt, wt = sleep_today
+            q_stars = round((q_pct or 0) / 20)  # 0-100 → 0-5
+            sleep_text = f"Heute Nacht: Qualität {q_stars}/5 ({q_pct}%) | eingeschlafen {bt or '?'}, aufgestanden {wt or '?'}"
+        else:
+            sleep_text = "Kein Schlafeintrag für heute — Annahme: ausreichend"
+
+        if sleep_hist:
+            hist_lines = [
+                f"  {s[0]}: Qualität {round((s[1] or 0)/20)}/5 | {s[2] or '?'} → {s[3] or '?'}"
+                for s in sleep_hist
+            ]
+            sleep_text += "\nLetzte 7 Nächte:\n" + "\n".join(hist_lines)
+
+        if brain_tasks:
+            task_lines = []
+            for t in brain_tasks:
+                dead = f", Deadline: {t[5]}" if t[5] else ""
+                task_lines.append(f"  ID={t[0]}: \"{t[1]}\" | ~{t[3] or '?'}min | Tags: {t[4] or 'keine'}{dead}")
+            tasks_text = "Tasks für heute:\n" + "\n".join(task_lines)
+        else:
+            tasks_text = "Noch keine Tasks für heute eingetragen"
+
+        if ki_exercises:
+            ex_lines = [f"  {r[0]}: {r[1]} — {r[2]}× {'Sek' if r[4] else 'Wdh'}" for r in ki_exercises]
+            training_text = "KI-Trainingsplan für heute:\n" + "\n".join(ex_lines)
+        elif training_plan and training_plan.get('rest_day'):
+            training_text = "Heute ist Ruhetag (geplant)"
+        elif training_plan and training_plan.get('tracks'):
+            training_text = "Training geplant: " + ", ".join(training_plan['tracks'])
+        else:
+            training_text = "Noch kein Trainingsplan für heute"
+
+        if habit_streaks:
+            habits_text = "Habits (letzte 7 Tage):\n" + "\n".join(
+                f"  {h[1]} {h[0]}: {h[2]}/7 Tage" for h in habit_streaks
+            )
+        else:
+            habits_text = "Keine Habits konfiguriert"
+
+        user_prompt = (
+            f"Datum: {today_str} ({WOCHENTAGE[today.weekday()]})\n\n"
+            f"SCHLAF:\n{sleep_text}\n\n"
+            f"AUFGABEN:\n{tasks_text}\n\n"
+            f"TRAINING:\n{training_text}\n\n"
+            f"HABITS:\n{habits_text}\n\n"
+            "Erstelle jetzt Angelo's Tages-Briefing."
+        )
+
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": _KI_BRIEFING_SYSTEM},
+                {"role": "user", "content": user_prompt}
+            ],
+            max_tokens=800,
+            stream=False
+        )
+        result = _parse_ki_json(resp.choices[0].message.content)
+        result.setdefault('energy_level', 3)
+        result.setdefault('focus_mode', 'normal')
+        result.setdefault('day_message', '')
+        result.setdefault('top_priority', '')
+        result.setdefault('adaptations', [])
+        result.setdefault('task_order', [])
+        result.setdefault('training_note', '')
+        save_ki_briefing(result)
+        return result
+    except Exception as e:
+        fallback = {
+            'energy_level': 3, 'focus_mode': 'normal',
+            'day_message': 'Starte ruhig. Ein Schritt nach dem anderen.',
+            'top_priority': '', 'adaptations': [], 'task_order': [], 'training_note': '',
+            '_error': str(e)
+        }
+        save_ki_briefing(fallback)
+        return fallback
+
+
+def _render_ki_coach_bar():
+    """Permanente KI-Coach-Leiste — erscheint auf JEDER Seite automatisch."""
+    api_key = get_setting('nvidia_api_key', '')
+
+    if not api_key:
+        st.markdown("""<div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);
+            border-radius:10px;padding:9px 16px;margin-bottom:16px;
+            display:flex;align-items:center;gap:8px">
+            <span style="font-size:13px">🤖</span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.3)">
+              KI-Coach inaktiv — NVIDIA API-Key in <strong style="color:rgba(255,255,255,0.5)">Einstellungen</strong> hinterlegen
+            </span>
+        </div>""", unsafe_allow_html=True)
+        return
+
+    briefing = get_ki_briefing()
+    if briefing is None:
+        with st.spinner("KI analysiert deinen Tag …"):
+            briefing = ki_morning_briefing(api_key)
+
+    if not briefing:
+        return
+
+    energy = max(1, min(5, int(briefing.get('energy_level', 3))))
+    focus_mode = briefing.get('focus_mode', 'normal')
+    day_message = briefing.get('day_message', '')
+    top_priority = briefing.get('top_priority', '')
+    adaptations = briefing.get('adaptations', [])
+    training_note = briefing.get('training_note', '')
+
+    _E_COLORS = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#00d4ff']
+    _E_LABELS  = ['Erschöpft', 'Niedrig', 'Okay', 'Gut', 'Top-Form']
+    _E_EMOJI   = ['😴', '😑', '🙂', '💪', '🔥']
+    e_color = _E_COLORS[energy - 1]
+    e_label = _E_LABELS[energy - 1]
+    e_emoji = _E_EMOJI[energy - 1]
+
+    _FOCUS_MAP = {
+        'deep':     ('🧠 Deep Work',   '#00d4ff'),
+        'light':    ('⚡ Light Mode',   '#f39c12'),
+        'recovery': ('🌿 Recovery',     '#a29bfe'),
+        'normal':   ('✅ Normal',       '#2ecc71'),
+    }
+    focus_label, focus_color = _FOCUS_MAP.get(focus_mode, ('✅ Normal', '#2ecc71'))
+
+    bar_key = f"ki_bar_expanded_{date.today().isoformat()}"
+    is_expanded = st.session_state.get(bar_key, True)
+
+    if is_expanded:
+        adapt_html = ""
+        if adaptations:
+            items = "".join(
+                f'<li style="margin:2px 0;color:rgba(255,255,255,0.55);font-size:11px">{a}</li>'
+                for a in adaptations[:3]
+            )
+            adapt_html = f'<ul style="margin:8px 0 0 14px;padding:0;list-style:disc">{items}</ul>'
+
+        priority_html = (
+            f'<div style="font-size:12px;color:#ffd700;margin-top:8px">'
+            f'🎯 Starte mit: <strong>{top_priority}</strong></div>'
+            if top_priority else ''
+        )
+        training_html = (
+            f'<div style="font-size:11px;color:rgba(162,155,254,0.85);margin-top:6px">'
+            f'🏋️ {training_note}</div>'
+            if training_note else ''
+        )
+
+        energy_bar = "".join(
+            f'<div style="width:14px;height:14px;border-radius:3px;'
+            f'background:{"' + e_color + '" if i < energy else "rgba(255,255,255,0.08)"};'
+            f'margin-right:3px"></div>'
+            for i in range(5)
+        )
+
+        st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(0,212,255,0.06),rgba(162,155,254,0.05));
+            border:1px solid rgba(0,212,255,0.18);border-radius:14px;padding:14px 18px;margin-bottom:14px">
+          <div style="display:flex;align-items:flex-start;gap:14px;flex-wrap:wrap">
+            <div style="min-width:110px">
+              <div style="font-size:9px;color:rgba(255,255,255,0.3);letter-spacing:1.5px;
+                          text-transform:uppercase;margin-bottom:4px">ENERGIE HEUTE</div>
+              <div style="display:flex;align-items:center;margin-bottom:4px">{energy_bar}</div>
+              <div style="font-size:12px;font-weight:700;color:{e_color}">{e_emoji} {e_label}</div>
+            </div>
+            <div style="border-left:1px solid rgba(255,255,255,0.08);padding-left:14px;flex:1;min-width:180px">
+              <div style="margin-bottom:6px">
+                <span style="font-size:10px;color:{focus_color};background:{focus_color}18;
+                  border:1px solid {focus_color}33;padding:2px 9px;border-radius:6px;font-weight:700">{focus_label}</span>
+              </div>
+              <div style="font-size:13px;color:rgba(255,255,255,0.85);font-style:italic;line-height:1.5">"{day_message}"</div>
+              {priority_html}
+              {training_html}
+              {adapt_html}
+            </div>
+          </div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        st.markdown(f"""<div style="background:rgba(0,212,255,0.03);border:1px solid rgba(0,212,255,0.1);
+            border-radius:10px;padding:8px 16px;margin-bottom:12px;
+            display:flex;align-items:center;gap:10px">
+          <span style="font-size:15px">{e_emoji}</span>
+          <span style="font-size:11px;color:rgba(255,255,255,0.45);font-style:italic;flex:1">{day_message}</span>
+          <span style="font-size:10px;color:{focus_color};font-weight:700">{focus_label}</span>
+        </div>""", unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        lbl = "▲ Einklappen" if is_expanded else "▼ KI-Coach anzeigen"
+        if st.button(lbl, key="ki_bar_toggle_btn", use_container_width=True):
+            st.session_state[bar_key] = not is_expanded
+            st.rerun()
+    with c2:
+        if st.button("🔄 Neu analysieren", key="ki_bar_refresh_btn", use_container_width=True):
+            conn_d = sqlite3.connect(DB_PATH)
+            conn_d.execute("DELETE FROM settings WHERE key=?",
+                           (f"ki_briefing_{date.today().isoformat()}",))
+            conn_d.commit()
+            conn_d.close()
+            st.rerun()
+
+
+def ki_get_task_priorities():
+    """Gibt die KI-priorisierten Task-IDs aus dem Tages-Briefing zurück."""
+    briefing = get_ki_briefing()
+    if not briefing:
+        return []
+    return [int(x) for x in briefing.get('task_order', []) if str(x).isdigit()]
+
+
+def ki_get_focus_mode():
+    """Gibt den aktuellen Focus Mode aus dem Briefing zurück."""
+    briefing = get_ki_briefing()
+    return briefing.get('focus_mode', 'normal') if briefing else 'normal'
+
+
+def ki_get_energy_level():
+    """Gibt den Energie-Level (1-5) aus dem Briefing zurück."""
+    briefing = get_ki_briefing()
+    return max(1, min(5, int(briefing.get('energy_level', 3)))) if briefing else 3
+
+
+def ki_get_training_note():
+    """Gibt den KI-Trainingshinweis aus dem Briefing zurück."""
+    briefing = get_ki_briefing()
+    return briefing.get('training_note', '') if briefing else ''
+
+
+def ki_get_top_priority():
+    """Gibt die KI-Priorität-1-Aufgabe zurück."""
+    briefing = get_ki_briefing()
+    return briefing.get('top_priority', '') if briefing else ''
+
+
+def ki_get_adaptations():
+    """Gibt die KI-Tagesanpassungen zurück."""
+    briefing = get_ki_briefing()
+    return briefing.get('adaptations', []) if briefing else []
 
 
 def ki_sleep_coach(api_key):
@@ -4497,6 +5785,64 @@ def render_planen_page():
                     add_entry("brain", brain_text.strip(), tags=tags, deadline=deadline)
                     st.rerun()
 
+    # ── KI Task-Priorisierung (nach Brain Dump, vor Highlight-Auswahl) ──
+    if has_brain and brain_rows:
+        ki_order = ki_get_task_priorities()
+        energy = ki_get_energy_level()
+        focus = ki_get_focus_mode()
+        top_prio = ki_get_top_priority()
+        adaptations = ki_get_adaptations()
+
+        focus_desc = {
+            'deep': 'Starte mit der schwersten Aufgabe — volle Energie vorhanden.',
+            'light': 'Leichtere Aufgaben bevorzugen — mittlere Energie.',
+            'recovery': 'Nur einfache Tasks — heute Energie schonen.',
+            'normal': 'Normaler Tag — wichtigste Task zuerst.'
+        }.get(focus, '')
+
+        _e_colors = ['#e74c3c', '#e67e22', '#f1c40f', '#2ecc71', '#00d4ff']
+        _e_emoji   = ['😴', '😑', '🙂', '💪', '🔥']
+        e_col  = _e_colors[energy - 1]
+        e_em   = _e_emoji[energy - 1]
+
+        # Tasks in KI-Reihenfolge sortieren (unbekannte IDs ans Ende)
+        id_to_row = {r[0]: r for r in brain_rows}
+        ki_sorted = [id_to_row[i] for i in ki_order if i in id_to_row]
+        remaining = [r for r in brain_rows if r[0] not in set(ki_order)]
+        ordered_tasks = ki_sorted + remaining
+
+        adapt_html = ""
+        if adaptations:
+            items = "".join(f'<li style="font-size:11px;color:rgba(255,255,255,0.55);margin:3px 0">{a}</li>' for a in adaptations[:3])
+            adapt_html = f'<ul style="margin:6px 0 0 16px;padding:0;list-style:disc">{items}</ul>'
+
+        task_items_html = ""
+        for idx, r in enumerate(ordered_tasks):
+            tid, content = r[0], r[2]
+            rank_color = '#ffd700' if idx == 0 else ('rgba(255,255,255,0.6)' if idx == 1 else 'rgba(255,255,255,0.35)')
+            rank_label = '① JETZT' if idx == 0 else (f'② danach' if idx == 1 else f'③+')
+            task_items_html += (
+                f'<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;'
+                f'border-bottom:1px solid rgba(255,255,255,0.05)">'
+                f'<span style="font-size:10px;font-weight:800;color:{rank_color};min-width:52px;'
+                f'padding-top:2px">{rank_label}</span>'
+                f'<span style="font-size:12.5px;color:rgba(255,255,255,0.8)">{content}</span>'
+                f'</div>'
+            )
+
+        st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(0,212,255,0.05),rgba(255,215,0,0.04));
+            border:1px solid rgba(0,212,255,0.2);border-radius:14px;padding:16px 20px;margin:12px 0">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+            <span style="font-size:16px">🤖</span>
+            <span style="font-size:13px;font-weight:800;color:white">KI-Priorisierung für heute</span>
+            <span style="font-size:10px;font-weight:700;color:{e_col};background:{e_col}18;
+              border:1px solid {e_col}33;padding:2px 8px;border-radius:6px">{e_em} Energie {energy}/5</span>
+          </div>
+          <div style="font-size:11.5px;color:rgba(0,212,255,0.7);margin-bottom:10px;font-style:italic">{focus_desc}</div>
+          {task_items_html}
+          {adapt_html}
+        </div>""", unsafe_allow_html=True)
+
     # Step 2: Daily Highlight
     brain_texts = [r[2] for r in rows if r[1] == "brain"]
     step2_label = "✅ Daily Highlight gesetzt" if has_highlight else "2️⃣  Daily Highlight — EINE Aufgabe"
@@ -4993,26 +6339,148 @@ def _clear_focus_mode():
 
 
 def _render_focus_mode():
-    phase = st.session_state.get('focus_phase', 'confirm')
-    task_id = st.session_state.get('focus_task_id')
-    task_name = st.session_state.get('focus_task_name', '?')
+    phase       = st.session_state.get('focus_phase', 'confirm')
+    task_id     = st.session_state.get('focus_task_id')
+    task_name   = st.session_state.get('focus_task_name', '?')
     task_estimate = st.session_state.get('focus_task_estimate', 25)
 
     st.markdown("""<style>
-    .focus-hdr{text-align:center;font-size:12px;letter-spacing:3px;text-transform:uppercase;
-               color:#00d4ff;opacity:.7;padding:10px 0 4px}
-    .focus-task{text-align:center;font-size:22px;font-weight:700;padding:8px 0 16px}
-    .pomo-time{text-align:center;font-size:76px;font-weight:900;color:#00d4ff;
-               letter-spacing:4px;line-height:1;padding:16px 0}
+    @keyframes pulseGlow {
+        0%,100% { box-shadow: 0 0 0 0 rgba(0,212,255,0.0); }
+        50%      { box-shadow: 0 0 14px 4px rgba(0,212,255,0.35); }
+    }
+    @keyframes completePop {
+        0%   { transform: scale(1); }
+        40%  { transform: scale(1.04); }
+        100% { transform: scale(1); }
+    }
+    @keyframes missionComplete {
+        0%   { opacity:0; transform: translateY(10px) scale(0.95); }
+        100% { opacity:1; transform: translateY(0) scale(1); }
+    }
+    @keyframes xpFloat {
+        0%   { opacity:1; transform:translateY(0) scale(1.1); }
+        100% { opacity:0; transform:translateY(-28px) scale(0.8); }
+    }
+    .focus-hdr {
+        text-align:center; font-size:11px; letter-spacing:3px; text-transform:uppercase;
+        color:#00d4ff; opacity:.7; padding:10px 0 4px;
+    }
+    .focus-task {
+        text-align:center; font-size:22px; font-weight:700; padding:6px 0 14px;
+    }
+    .pomo-time {
+        text-align:center; font-size:80px; font-weight:900; color:#00d4ff;
+        letter-spacing:6px; line-height:1; padding:12px 0;
+        text-shadow: 0 0 40px rgba(0,212,255,0.4);
+    }
+    .pomo-time.urgent { color:#ff6b6b; text-shadow: 0 0 40px rgba(255,107,107,0.5); }
+    .quest-panel {
+        background: rgba(0,0,0,0.25);
+        border: 1px solid rgba(255,255,255,0.07);
+        border-radius: 14px;
+        padding: 14px 18px;
+        margin-top: 18px;
+    }
+    .quest-header {
+        display:flex; align-items:center; justify-content:space-between;
+        margin-bottom: 10px;
+    }
+    .quest-label {
+        font-size:10px; color:rgba(255,255,255,0.35); letter-spacing:2px;
+        text-transform:uppercase; font-weight:700;
+    }
+    .quest-count {
+        font-size:12px; font-weight:700;
+    }
+    .quest-step {
+        display:flex; align-items:center; gap:10px;
+        border-radius:10px; padding:9px 12px; margin:5px 0;
+        border:1px solid rgba(255,255,255,0.06);
+        background:rgba(255,255,255,0.025);
+        transition: all 0.3s ease;
+    }
+    .quest-step.active {
+        border-color:rgba(0,212,255,0.35);
+        background:rgba(0,212,255,0.06);
+        animation: pulseGlow 2.5s infinite;
+    }
+    .quest-step.done {
+        border-color:rgba(46,204,113,0.3);
+        background:rgba(46,204,113,0.06);
+        animation: completePop 0.35s ease;
+    }
+    .quest-step.locked {
+        opacity:0.4;
+    }
+    .quest-num {
+        width:22px; height:22px; border-radius:50%;
+        display:flex; align-items:center; justify-content:center;
+        font-size:11px; font-weight:700; flex-shrink:0;
+        background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.5);
+    }
+    .quest-num.active { background:rgba(0,212,255,0.2); color:#00d4ff; }
+    .quest-num.done   { background:rgba(46,204,113,0.25); color:#2ecc71; }
+    .quest-text {
+        flex:1; font-size:13px; font-weight:500; color:white;
+    }
+    .quest-text.done {
+        text-decoration:line-through; color:rgba(255,255,255,0.35);
+    }
+    .quest-xp {
+        font-size:10px; font-weight:700; color:#ffd700;
+        background:rgba(255,215,0,0.1); padding:2px 7px;
+        border-radius:5px; flex-shrink:0;
+    }
+    .quest-xp.done { color:#2ecc71; background:rgba(46,204,113,0.1); }
+    .mission-complete {
+        text-align:center; padding:14px;
+        background:linear-gradient(135deg,rgba(46,204,113,0.15),rgba(0,212,255,0.08));
+        border:1px solid rgba(46,204,113,0.35); border-radius:12px;
+        animation: missionComplete 0.5s ease;
+        margin-top:12px;
+    }
+    .round-badge {
+        display:inline-flex; align-items:center; gap:6px;
+        background:rgba(162,155,254,0.12); border:1px solid rgba(162,155,254,0.25);
+        border-radius:20px; padding:4px 14px; font-size:12px; font-weight:700;
+        color:#a29bfe; margin-bottom:12px;
+    }
+    /* Hide step checkbox labels */
+    div[data-testid="stCheckbox"] > label > div[data-testid="stMarkdownContainer"] > p {
+        display:none !important;
+    }
     </style>""", unsafe_allow_html=True)
 
     _, center, _ = st.columns([0.5, 3, 0.5])
 
-    # ── Phase 1: Anti-Distraktion Bestätigung ──────────────────────
+    # ── Phase 1: Anti-Distraktion + Schritt-Vorschau ───────────────
     if phase == 'confirm':
         with center:
             st.markdown('<div class="focus-hdr">🎯 Fokus Modus</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="focus-task">{task_name}</div>', unsafe_allow_html=True)
+
+            # Zeige Task-Schritte als Vorschau
+            preview_steps = get_task_steps(task_id) if task_id else []
+            if preview_steps:
+                steps_html = ""
+                for s in preview_steps:
+                    steps_html += (
+                        f'<div style="display:flex;align-items:center;gap:10px;padding:7px 12px;'
+                        f'background:rgba(255,255,255,0.025);border-radius:8px;margin:4px 0;'
+                        f'border:1px solid rgba(255,255,255,0.05)">'
+                        f'<span style="font-size:10px;color:rgba(255,255,255,0.3);min-width:18px">{s["step_number"]}.</span>'
+                        f'<span style="font-size:12px;color:rgba(255,255,255,0.7)">{s["content"]}</span>'
+                        f'</div>'
+                    )
+                st.markdown(
+                    f'<div style="margin-bottom:14px">'
+                    f'<div style="font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:1.5px;'
+                    f'text-transform:uppercase;margin-bottom:6px">🗡️ {len(preview_steps)} Mission-Ziele</div>'
+                    f'{steps_html}</div>',
+                    unsafe_allow_html=True
+                )
+
             st.markdown("---")
             st.markdown("##### Bevor du startest:")
             c1 = st.checkbox("📵 Handy auf lautlos / umgedreht", key="fc_phone")
@@ -5027,6 +6495,8 @@ def _render_focus_mode():
                     st.session_state.focus_round = 1
                     st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
                     st.session_state.focus_total_seconds = 0
+                    st.session_state.focus_steps = get_task_steps(task_id) if task_id else []
+                    st.session_state.focus_block_start = datetime.utcnow().isoformat()
                     st.rerun()
             else:
                 st.button("✅ Alle Häkchen setzen zum Starten", disabled=True, use_container_width=True)
@@ -5035,10 +6505,11 @@ def _render_focus_mode():
                 _clear_focus_mode()
                 st.rerun()
 
-    # ── Phase 2: Pomodoro Countdown ─────────────────────────────────
+    # ── Phase 2: Pomodoro Countdown + Gamified Steps ───────────────
     elif phase == 'pomodoro':
         round_num = st.session_state.get('focus_round', 1)
         start_str = st.session_state.get('focus_pomodoro_start', datetime.utcnow().isoformat())
+        block_start = st.session_state.get('focus_block_start', start_str)
         try:
             elapsed = int((datetime.utcnow() - datetime.fromisoformat(start_str)).total_seconds())
         except Exception:
@@ -5048,17 +6519,54 @@ def _render_focus_mode():
         pct = min(1.0, elapsed / POMODORO_DURATION)
 
         with center:
-            st.markdown(f'<div class="focus-hdr">🎯 FOKUS — Runde {round_num}</div>', unsafe_allow_html=True)
+            # Round-Badge
+            st.markdown(
+                f'<div style="text-align:center"><span class="round-badge">'
+                f'🎯 FOKUS · RUNDE {round_num}</span></div>',
+                unsafe_allow_html=True
+            )
             st.markdown(f'<div class="focus-task">{task_name}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="pomo-time">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
-            st.progress(pct)
+
+            # Timer
+            time_color = "urgent" if remaining < 120 else ""
+            st.markdown(f'<div class="pomo-time {time_color}">{mins:02d}:{secs:02d}</div>', unsafe_allow_html=True)
+
+            # Progress bar mit Segment-Markierungen
+            bar_pct = int(pct * 100)
+            seg_html = ""
+            for seg in [25, 50, 75]:
+                seg_html += (
+                    f'<div style="position:absolute;left:{seg}%;top:-2px;width:2px;height:8px;'
+                    f'background:rgba(0,0,0,0.4);z-index:2"></div>'
+                )
+            st.markdown(
+                f'<div style="position:relative;height:6px;background:rgba(255,255,255,0.06);'
+                f'border-radius:3px;margin:8px 0 4px">{seg_html}'
+                f'<div style="position:absolute;top:0;left:0;height:100%;width:{bar_pct}%;'
+                f'background:{"#ff6b6b" if remaining < 120 else "#00d4ff"};border-radius:3px;'
+                f'transition:width 0.8s ease"></div></div>',
+                unsafe_allow_html=True
+            )
+            st.caption(f"{bar_pct}% · {round(elapsed/60, 1)} Min absolviert")
+
             if remaining == 0:
-                st.success("⏰ 25 Minuten voll! Wie weiter?")
+                st.markdown(
+                    '<div style="text-align:center;padding:10px;background:rgba(255,215,0,0.1);'
+                    'border-radius:10px;border:1px solid rgba(255,215,0,0.3);font-weight:700;color:#ffd700">'
+                    '⏰ 25 Minuten voll! Wie weiter?</div>',
+                    unsafe_allow_html=True
+                )
+
             st.write("")
             btn1, btn2, btn3, btn4 = st.columns(4)
             with btn1:
                 if st.button("✅ Aufgabe fertig", use_container_width=True, type="primary"):
                     done_secs = st.session_state.get('focus_total_seconds', 0) + (POMODORO_DURATION - remaining)
+                    steps_now = st.session_state.get('focus_steps', [])
+                    s_done = sum(1 for s in steps_now if s.get('done'))
+                    log_focus_block(task_id, task_name, block_start,
+                                    datetime.utcnow().isoformat(), POMODORO_DURATION - remaining,
+                                    round_num, s_done, len(steps_now))
                     toggle_done(task_id, True, elapsed_seconds=done_secs,
                                 points=compute_points(done_secs, task_estimate))
                     st.session_state.focus_phase = 'review'
@@ -5066,13 +6574,24 @@ def _render_focus_mode():
                     st.rerun()
             with btn2:
                 if st.button("🔄 Noch eine Runde", use_container_width=True):
+                    steps_now = st.session_state.get('focus_steps', [])
+                    s_done = sum(1 for s in steps_now if s.get('done'))
+                    log_focus_block(task_id, task_name, block_start,
+                                    datetime.utcnow().isoformat(), POMODORO_DURATION - remaining,
+                                    round_num, s_done, len(steps_now))
                     prev = st.session_state.get('focus_total_seconds', 0)
                     st.session_state.focus_total_seconds = prev + (POMODORO_DURATION - remaining)
                     st.session_state.focus_round = round_num + 1
                     st.session_state.focus_pomodoro_start = datetime.utcnow().isoformat()
+                    st.session_state.focus_block_start = datetime.utcnow().isoformat()
                     st.rerun()
             with btn3:
                 if st.button("🧺 Haushalts-Pause", use_container_width=True):
+                    steps_now = st.session_state.get('focus_steps', [])
+                    s_done = sum(1 for s in steps_now if s.get('done'))
+                    log_focus_block(task_id, task_name, block_start,
+                                    datetime.utcnow().isoformat(), POMODORO_DURATION - remaining,
+                                    round_num, s_done, len(steps_now))
                     prev = st.session_state.get('focus_total_seconds', 0)
                     st.session_state.focus_total_seconds = prev + (POMODORO_DURATION - remaining)
                     st.session_state.focus_phase = 'household_break'
@@ -5081,6 +6600,87 @@ def _render_focus_mode():
                 if st.button("🚫 Abbrechen", use_container_width=True):
                     _clear_focus_mode()
                     st.rerun()
+
+            # ── GAMIFIED QUEST STEPS ────────────────────────────────
+            steps = st.session_state.get('focus_steps', [])
+            if steps:
+                done_n    = sum(1 for s in steps if s.get('done'))
+                total_n   = len(steps)
+                all_done  = done_n == total_n
+                pct_steps = done_n / total_n if total_n else 0
+
+                # Progress-Header
+                count_color = "#2ecc71" if all_done else "#00d4ff"
+                count_text  = "🔥 ALLE ZIELE ERREICHT!" if all_done else f"{done_n}/{total_n} erledigt"
+
+                quest_bar_w = int(pct_steps * 100)
+                st.markdown(
+                    f'<div class="quest-panel">'
+                    f'<div class="quest-header">'
+                    f'<span class="quest-label">🗡️ Mission-Ziele</span>'
+                    f'<span class="quest-count" style="color:{count_color}">{count_text}</span>'
+                    f'</div>'
+                    f'<div style="height:5px;background:rgba(255,255,255,0.05);border-radius:3px;margin-bottom:12px">'
+                    f'<div style="width:{quest_bar_w}%;height:100%;border-radius:3px;'
+                    f'background:{"linear-gradient(90deg,#2ecc71,#00ff88)" if all_done else "linear-gradient(90deg,#00d4ff,#0099cc)"};'
+                    f'transition:width 0.6s ease"></div>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+                # Nächster offener Step (aktiv)
+                next_step_id = next((s['id'] for s in steps if not s.get('done')), None)
+
+                for step in steps:
+                    is_done   = step.get('done', False)
+                    is_active = (not is_done) and (step['id'] == next_step_id)
+                    is_locked = (not is_done) and (step['id'] != next_step_id)
+
+                    css_cls     = "done" if is_done else ("active" if is_active else "locked")
+                    num_cls     = css_cls
+                    num_icon    = "✓" if is_done else str(step['step_number'])
+                    xp_val      = 5 if is_done else (10 if is_active else 5)
+                    xp_cls      = "done" if is_done else ""
+                    text_cls    = "done" if is_done else ""
+
+                    # Render HTML card
+                    st.markdown(
+                        f'<div class="quest-step {css_cls}">'
+                        f'<div class="quest-num {num_cls}">{num_icon}</div>'
+                        f'<div class="quest-text {text_cls}">{step["content"]}</div>'
+                        f'<div class="quest-xp {xp_cls}">+{xp_val} XP</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
+                    # Interaktiver Toggle — aktive Steps
+                    if is_active or is_done:
+                        chk_col, _ = st.columns([0.12, 0.88])
+                        with chk_col:
+                            checked = st.checkbox(
+                                " ", value=is_done,
+                                key=f"fstep_{step['id']}_{round_num}"
+                            )
+                            if checked != is_done:
+                                toggle_step(step['id'], checked)
+                                for s in st.session_state.focus_steps:
+                                    if s['id'] == step['id']:
+                                        s['done'] = checked
+                                st.rerun()
+
+                # Mission Complete Banner
+                if all_done:
+                    st.markdown(
+                        '<div class="mission-complete">'
+                        '<div style="font-size:28px;margin-bottom:4px">🏆</div>'
+                        '<div style="font-size:16px;font-weight:900;color:#2ecc71">MISSION COMPLETE</div>'
+                        '<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:4px">'
+                        'Alle Ziele erreicht! Aufgabe als fertig markieren.</div>'
+                        '</div>',
+                        unsafe_allow_html=True
+                    )
+
+                st.markdown('</div>', unsafe_allow_html=True)
 
         if remaining > 0:
             time.sleep(1)
@@ -5361,21 +6961,32 @@ def render_tagesfokus_page():
                     st.session_state.focus_phase = 'confirm'
                     st.rerun()
 
-        # Inline editors: Micro + Kategorie
+        # ── Action-Buttons: Micro | Kategorie | Bearbeiten | Löschen ──
         if not done:
-            btn_cols = st.columns(2)
-            with btn_cols[0]:
+            bc1, bc2, bc3, bc4 = st.columns(4)
+            with bc1:
                 micro_lbl = "⚡ Micro ändern" if micro_action else "⚡ Micro setzen"
                 if st.button(micro_lbl, key=f"{pfx}_mshow_{eid}", use_container_width=True):
                     st.session_state[f"show_micro_{eid}"] = not st.session_state.get(f"show_micro_{eid}", False)
                     st.rerun()
-            if show_category_controls:
-                with btn_cols[1]:
+            with bc2:
+                if show_category_controls:
                     cat_lbl = f"🏷️ {cat['icon']} {cat['name']}" if cat else "🏷️ Kategorie"
                     if st.button(cat_lbl, key=f"{pfx}_cshow_{eid}", use_container_width=True):
                         st.session_state[f"show_cat_{eid}"] = not st.session_state.get(f"show_cat_{eid}", False)
                         st.rerun()
+            with bc3:
+                edit_open = st.session_state.get(f"edit_open_{eid}", False)
+                if st.button("✏️ Bearbeiten" if not edit_open else "✕ Schließen",
+                             key=f"{pfx}_editbtn_{eid}", use_container_width=True):
+                    st.session_state[f"edit_open_{eid}"] = not edit_open
+                    st.rerun()
+            with bc4:
+                if st.button("🗑️ Löschen", key=f"{pfx}_del_{eid}", use_container_width=True):
+                    delete_entry(eid)
+                    st.rerun()
 
+            # ── Micro-Eingabe ──────────────────────────────────────
             if st.session_state.get(f"show_micro_{eid}"):
                 new_micro = st.text_input(
                     "⚡ Starten mit (2 min):", value=micro_action or "",
@@ -5393,6 +7004,7 @@ def render_tagesfokus_page():
                         st.session_state[f"show_micro_{eid}"] = False
                         st.rerun()
 
+            # ── Kategorie-Auswahl ──────────────────────────────────
             if show_category_controls and st.session_state.get(f"show_cat_{eid}"):
                 cat_options = ["— keine —"] + [f"{c['icon']} {c['name']}" for c in categories]
                 cur_idx = 0
@@ -5419,6 +7031,63 @@ def render_tagesfokus_page():
                     if st.button("✕", key=f"{pfx}_ccancel_{eid}", use_container_width=True):
                         st.session_state[f"show_cat_{eid}"] = False
                         st.rerun()
+
+            # ── Inline-Bearbeiten-Formular ─────────────────────────
+            if st.session_state.get(f"edit_open_{eid}"):
+                st.markdown(
+                    '<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.1);'
+                    'border-radius:10px;padding:14px 16px;margin-top:6px">',
+                    unsafe_allow_html=True
+                )
+                ef1, ef2 = st.columns([3, 1])
+                with ef1:
+                    edit_content = st.text_input(
+                        "Aufgabe", value=content,
+                        key=f"{pfx}_econtent_{eid}"
+                    )
+                with ef2:
+                    edit_est = st.number_input(
+                        "Minuten", value=int(estimate or 0), min_value=0, max_value=480,
+                        key=f"{pfx}_eest_{eid}"
+                    )
+                ef3, ef4 = st.columns(2)
+                with ef3:
+                    edit_tags = st.text_input(
+                        "Tags (kommagetrennt)", value=tags or "",
+                        key=f"{pfx}_etags_{eid}"
+                    )
+                with ef4:
+                    dl_val = None
+                    if deadline:
+                        try:
+                            dl_val = date.fromisoformat(deadline)
+                        except Exception:
+                            pass
+                    edit_dl = st.date_input(
+                        "Deadline (optional)", value=dl_val,
+                        key=f"{pfx}_edl_{eid}"
+                    )
+                esave, ecancel = st.columns(2)
+                with esave:
+                    if st.button("💾 Änderungen speichern", key=f"{pfx}_esave_{eid}", use_container_width=True, type="primary"):
+                        dl_str = edit_dl.isoformat() if edit_dl else None
+                        conn_e = sqlite3.connect(DB_PATH)
+                        conn_e.execute(
+                            "UPDATE entries SET content=?, estimate_minutes=?, tags=?, deadline=? WHERE id=?",
+                            (edit_content.strip() or content,
+                             int(edit_est) if edit_est else None,
+                             edit_tags.strip() or None,
+                             dl_str, eid)
+                        )
+                        conn_e.commit()
+                        conn_e.close()
+                        st.session_state[f"edit_open_{eid}"] = False
+                        st.rerun()
+                with ecancel:
+                    if st.button("✕ Abbrechen", key=f"{pfx}_ecancel_{eid}", use_container_width=True):
+                        st.session_state[f"edit_open_{eid}"] = False
+                        st.rerun()
+                st.markdown('</div>', unsafe_allow_html=True)
 
         # ── Steps Checklist ──────────────────────────────────────
         if steps and not done:
@@ -5981,22 +7650,28 @@ def render_projekte_page():
         return
 
     st.title("Projekte")
-    st.caption("Große Ziele — automatisch auf tägliche Aufgaben runtergebrochen.")
+    st.caption("Ein Projekt, ein Task pro Tag — kein Chaos, nur Fortschritt.")
 
     with st.expander("➕ Neues Projekt erstellen", expanded=False):
         with st.form("new_project_form"):
-            name = st.text_input("Projektname", placeholder="z.B. Video Kurs Trading & Risikomanagement")
-            description = st.text_area("Beschreibung (optional)", height=60)
+            name = st.text_input("Projektname", placeholder="z.B. Video-Kurs Trading erstellen")
+            roter_faden = st.text_area(
+                "Roter Faden",
+                height=70,
+                placeholder="Was ist das Kernziel? Welchen Ansatz verfolgst du? Was soll am Ende stehen?\nz.B. 'Schritt-für-Schritt Video-Kurs mit je 1 Video pro Session — immer mit Skript beginnen, dann aufnehmen.'"
+            )
+            description = st.text_area("Beschreibung / Kontext (optional)", height=50)
             col1, col2, col3 = st.columns(3)
             with col1:
                 deadline = st.date_input("Deadline", value=date.today() + timedelta(days=30))
             with col2:
-                daily_minutes = st.number_input("Arbeitszeit/Tag (Min)", min_value=15, step=15, value=60)
+                daily_minutes = st.number_input("Fokus-Zeit/Tag (Min)", min_value=15, step=15, value=60)
             with col3:
                 color = st.color_picker("Projektfarbe", value="#60a5fa")
             if st.form_submit_button("Projekt anlegen", use_container_width=True):
                 if name.strip():
-                    pid = add_project(name.strip(), description.strip(), deadline.isoformat(), color, daily_minutes)
+                    pid = add_project(name.strip(), description.strip(), deadline.isoformat(),
+                                      color, daily_minutes, roter_faden.strip())
                     st.session_state.selected_project = pid
                     st.rerun()
 
@@ -6006,40 +7681,85 @@ def render_projekte_page():
         st.info("Noch keine Projekte — erstelle dein erstes Projekt oben.")
         return
 
+    today_str = date.today().isoformat()
+
     for proj in projects:
-        pid, name, description, deadline, color, active, created_at, daily_minutes = proj
+        pid, name, description, deadline, color, active, created_at, daily_minutes, roter_faden = proj
         tasks = get_project_tasks(pid)
         total = len(tasks)
         done_c = sum(1 for t in tasks if t[5])
         pct = done_c / total if total > 0 else 0
-        next_task = next((t for t in tasks if not t[5]), None)
         _, _, urg_label, _ = get_urgency(deadline)
 
-        st.markdown(
-            f'<div style="border-left:5px solid {color};background:rgba(0,0,0,0.15);'
-            f'border-radius:10px;padding:16px 20px;margin-bottom:4px">'
-            f'<strong style="font-size:18px">{name}</strong>'
-            + (f'<span class="dl-badge">{urg_label}</span>' if urg_label else
-               f'<span class="dl-badge">📅 {deadline}</span>' if deadline else "")
-            + f'<span class="dl-badge">⏱️ {daily_minutes} min/Tag</span>'
-            + f'<br><small style="opacity:.65">{done_c}/{total} Aufgaben · {int(pct*100)}% erledigt</small>'
-            + (f'<br><small style="opacity:.65">➡️ Als nächstes: <em>{next_task[2]}</em></small>' if next_task else
-               '<br><small style="color:#4ade80">✅ Alle Aufgaben erledigt!</small>' if total > 0 else "")
-            + '</div>', unsafe_allow_html=True
+        # Heutiger Task aus project_tasks
+        today_proj_task = next(
+            (t for t in tasks if not t[5] and t[7] == today_str), None
         )
-        st.progress(pct)
-        c1, c2, c3, _ = st.columns([0.16, 0.18, 0.12, 0.54])
+        next_undone = next((t for t in tasks if not t[5]), None)
+
+        # Fortschritt-Farbe
+        if pct >= 0.8:
+            bar_color = '#2ecc71'
+        elif pct >= 0.4:
+            bar_color = '#f39c12'
+        else:
+            bar_color = color
+
+        today_html = ""
+        if today_proj_task:
+            today_html = (
+                f'<div style="display:flex;align-items:center;gap:8px;margin-top:10px;'
+                f'background:{color}15;border-radius:8px;padding:8px 12px">'
+                f'<span style="font-size:11px;font-weight:800;color:{color}">HEUTE</span>'
+                f'<span style="font-size:12.5px;color:rgba(255,255,255,0.85)">{today_proj_task[2]}</span>'
+                f'<span style="font-size:10px;color:rgba(255,255,255,0.35);margin-left:auto">⏱️ {today_proj_task[3] or 30} min</span>'
+                f'</div>'
+            )
+        elif next_undone:
+            today_html = (
+                f'<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:8px">'
+                f'Nächste: {next_undone[2]}</div>'
+            )
+        elif total > 0:
+            today_html = '<div style="font-size:11px;color:#2ecc71;margin-top:8px">✅ Alle Aufgaben erledigt!</div>'
+
+        faden_html = (
+            f'<div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:4px;font-style:italic">'
+            f'🧵 {roter_faden[:120]}{"…" if len(roter_faden)>120 else ""}</div>'
+        ) if roter_faden else ''
+
+        st.markdown(
+            f'<div style="border-left:4px solid {color};background:rgba(255,255,255,0.03);'
+            f'border-radius:12px;padding:16px 20px;margin-bottom:6px">'
+            f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+            f'<strong style="font-size:17px;color:white">{name}</strong>'
+            + (f'<span class="dl-badge">{urg_label}</span>' if urg_label else
+               (f'<span class="dl-badge">📅 {deadline}</span>' if deadline else ''))
+            + f'<span class="dl-badge">⏱️ {daily_minutes} min/Tag</span>'
+            + f'</div>'
+            + f'{faden_html}'
+            + f'<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:6px">{done_c}/{total} Aufgaben · {int(pct*100)}%</div>'
+            + today_html
+            + '</div>',
+            unsafe_allow_html=True
+        )
+
+        # Fortschrittsbalken
+        bar_w = int(pct * 100)
+        st.markdown(
+            f'<div style="height:4px;background:rgba(255,255,255,0.07);border-radius:2px;margin:-4px 0 10px 0">'
+            f'<div style="width:{bar_w}%;height:100%;background:{bar_color};border-radius:2px;'
+            f'transition:width 0.4s"></div></div>',
+            unsafe_allow_html=True
+        )
+
+        c1, c2, _ = st.columns([0.16, 0.12, 0.72])
         with c1:
             if st.button("Öffnen →", key=f"proj_open_{pid}", use_container_width=True):
                 st.session_state.selected_project = pid
                 st.rerun()
         with c2:
-            if st.button("🔄 Einplanen", key=f"proj_sched_{pid}", use_container_width=True):
-                schedule_project_tasks(pid)
-                st.success("Neu eingeplant!")
-                st.rerun()
-        with c3:
-            if st.button("🗑️", key=f"proj_del_{pid}"):
+            if st.button("🗑️", key=f"proj_del_{pid}", use_container_width=True):
                 delete_project(pid)
                 st.rerun()
         st.markdown("")
@@ -6321,7 +8041,9 @@ def _render_project_forecast(pid, tasks, deadline, daily_minutes):
 def _render_project_detail(project_id):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('SELECT id, name, description, deadline, color, active, created_at, daily_minutes FROM projects WHERE id=?', (project_id,))
+    c.execute('''SELECT id, name, description, deadline, color, active, created_at, daily_minutes,
+                        COALESCE(roter_faden,'')
+                 FROM projects WHERE id=?''', (project_id,))
     proj = c.fetchone()
     conn.close()
     if not proj:
@@ -6329,7 +8051,7 @@ def _render_project_detail(project_id):
         st.rerun()
         return
 
-    pid, name, description, deadline, color, active, created_at, daily_minutes = proj
+    pid, name, description, deadline, color, active, created_at, daily_minutes, roter_faden = proj
 
     if st.button("← Alle Projekte", key="proj_back"):
         st.session_state.selected_project = None
@@ -6347,126 +8069,164 @@ def _render_project_detail(project_id):
     except Exception:
         days_left = None
 
+    # ── Header ──────────────────────────────────────────────────────
     st.markdown(f'<h2 style="color:{color};margin-bottom:4px">{name}</h2>', unsafe_allow_html=True)
+
+    if roter_faden:
+        st.markdown(
+            f'<div style="background:{color}10;border-left:3px solid {color};border-radius:0 10px 10px 0;'
+            f'padding:12px 16px;margin-bottom:12px">'
+            f'<div style="font-size:10px;color:rgba(255,255,255,0.35);letter-spacing:1.5px;'
+            f'text-transform:uppercase;margin-bottom:4px">ROTER FADEN</div>'
+            f'<div style="font-size:13px;color:rgba(255,255,255,0.8);font-style:italic">{roter_faden}</div>'
+            f'</div>',
+            unsafe_allow_html=True
+        )
+
     if description:
         st.caption(description)
 
+    # ── Today's task banner ──────────────────────────────────────────
+    today_str = date.today().isoformat()
+    today_proj_task = next((t for t in tasks if not t[5] and t[7] == today_str), None)
+    if today_proj_task:
+        st.markdown(
+            f'<div style="background:linear-gradient(135deg,{color}20,{color}08);'
+            f'border:1px solid {color}44;border-radius:12px;padding:14px 18px;margin-bottom:12px">'
+            f'<div style="font-size:10px;font-weight:800;color:{color};letter-spacing:1.5px;'
+            f'text-transform:uppercase;margin-bottom:6px">HEUTE DRAN</div>'
+            f'<div style="font-size:14px;font-weight:700;color:white">{today_proj_task[2]}</div>'
+            + (f'<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px">⏱️ {today_proj_task[3]} min geplant</div>' if today_proj_task[3] else '')
+            + '</div>',
+            unsafe_allow_html=True
+        )
+
+    # ── Stats ──────────────────────────────────────────────────────
     mc1, mc2, mc3, mc4 = st.columns(4)
     mc1.metric("Aufgaben", f"{done_count} / {total}")
     mc2.metric("Fortschritt", f"{int(pct*100)} %")
     mc3.metric("Zeit erledigt", f"{done_mins} min")
     if days_left is not None:
-        mc4.metric("Tage bis Deadline", days_left)
+        mc4.metric("Tage bis Deadline", days_left, delta=None)
 
-    st.progress(pct)
+    bar_w = int(pct * 100)
+    st.markdown(
+        f'<div style="height:6px;background:rgba(255,255,255,0.07);border-radius:3px;margin:4px 0 12px 0">'
+        f'<div style="width:{bar_w}%;height:100%;background:{color};border-radius:3px"></div></div>',
+        unsafe_allow_html=True
+    )
 
-    if days_left is not None:
+    if days_left is not None and days_left >= 0:
         undone = [t for t in tasks if not t[5]]
         if undone:
             remaining_mins = sum(t[3] or 0 for t in undone)
-            if days_left > 0:
-                needed = remaining_mins / days_left
-                if days_left < 0:
-                    st.error(f"⚠️ Deadline überschritten! Noch {remaining_mins} min Arbeit offen.")
-                elif days_left <= 3:
-                    st.warning(f"⏰ Nur noch {days_left} Tage! Ca. {int(needed)} min/Tag nötig.")
-                else:
-                    st.info(f"📊 {remaining_mins} min offen · ca. {int(needed)} min/Tag nötig · {daily_minutes} min/Tag geplant")
+            needed = remaining_mins / max(days_left, 1)
+            if days_left <= 3:
+                st.warning(f"⏰ Nur noch {days_left} Tage! Ca. {int(needed)} min/Tag nötig.")
+            elif int(needed) > daily_minutes:
+                st.warning(f"📊 {int(needed)} min/Tag nötig — mehr als die geplanten {daily_minutes} min/Tag.")
+    elif days_left is not None and days_left < 0:
+        st.error(f"⚠️ Deadline überschritten! Noch {sum(t[3] or 0 for t in tasks if not t[5])} min offen.")
 
     st.markdown("---")
 
-    col1, col2, _ = st.columns([0.28, 0.28, 0.44])
-    with col1:
-        if st.button("🔄 Aufgaben neu einplanen", use_container_width=True):
-            schedule_project_tasks(pid)
-            st.success("Neu eingeplant!")
-            st.rerun()
-    with col2:
-        if st.button("⚙️ Projekteinstellungen", use_container_width=True, key="proj_settings_btn"):
-            st.session_state[f'proj_settings_{pid}'] = not st.session_state.get(f'proj_settings_{pid}', False)
-            st.rerun()
+    # ── Einstellungen ──────────────────────────────────────────────
+    if st.button("⚙️ Projekteinstellungen", use_container_width=False, key="proj_settings_btn"):
+        st.session_state[f'proj_settings_{pid}'] = not st.session_state.get(f'proj_settings_{pid}', False)
+        st.rerun()
 
     if st.session_state.get(f'proj_settings_{pid}'):
         with st.form("edit_project_form"):
             new_name = st.text_input("Name", value=name)
-            new_desc = st.text_area("Beschreibung", value=description or "", height=60)
+            new_faden = st.text_area("Roter Faden", value=roter_faden or "", height=80)
+            new_desc = st.text_area("Beschreibung", value=description or "", height=50)
             c1, c2, c3 = st.columns(3)
             with c1:
-                new_deadline = st.date_input("Deadline", value=date.fromisoformat(deadline) if deadline else date.today())
+                new_deadline = st.date_input("Deadline",
+                    value=date.fromisoformat(deadline) if deadline else date.today())
             with c2:
                 new_daily = st.number_input("Min/Tag", min_value=15, step=15, value=daily_minutes or 60)
             with c3:
                 new_color = st.color_picker("Farbe", value=color or "#60a5fa")
             if st.form_submit_button("Speichern"):
                 conn2 = sqlite3.connect(DB_PATH)
-                c2 = conn2.cursor()
-                c2.execute('UPDATE projects SET name=?, description=?, deadline=?, daily_minutes=?, color=? WHERE id=?',
-                           (new_name, new_desc, new_deadline.isoformat(), new_daily, new_color, pid))
+                conn2.execute(
+                    'UPDATE projects SET name=?, description=?, deadline=?, daily_minutes=?, color=?, roter_faden=? WHERE id=?',
+                    (new_name, new_desc, new_deadline.isoformat(), new_daily, new_color, new_faden.strip(), pid)
+                )
                 conn2.commit()
                 conn2.close()
                 st.session_state[f'proj_settings_{pid}'] = False
                 st.rerun()
 
-    # Add task form
-    with st.expander("➕ Aufgabe hinzufügen"):
+    # ── Task-Liste ────────────────────────────────────────────────
+
+    # Aufgabe hinzufügen
+    with st.expander("➕ Aufgabe hinzufügen", expanded=False):
         with st.form("add_task_form"):
-            task_content = st.text_input("Aufgabe", placeholder="Was muss gemacht werden?")
+            task_content = st.text_input("Was muss gemacht werden?",
+                                          placeholder="Konkret und umsetzbar formulieren")
             col1, col2 = st.columns(2)
             with col1:
                 task_estimate = st.number_input("Minuten", min_value=5, step=5, value=30)
             with col2:
                 task_priority = st.slider("Priorität", min_value=0, max_value=10, value=5)
+            task_notes = st.text_area("Notizen (optional)", height=60,
+                                       placeholder="Kontext, Links, Gedanken...")
             if st.form_submit_button("Aufgabe hinzufügen", use_container_width=True):
                 if task_content.strip():
                     add_project_task(pid, task_content.strip(), task_estimate, task_priority)
-                    schedule_project_tasks(pid)
+                    if task_notes.strip():
+                        conn_n = sqlite3.connect(DB_PATH)
+                        last_id = conn_n.execute("SELECT MAX(id) FROM project_tasks WHERE project_id=?", (pid,)).fetchone()[0]
+                        if last_id:
+                            conn_n.execute("UPDATE project_tasks SET notes=? WHERE id=?", (task_notes.strip(), last_id))
+                            conn_n.commit()
+                        conn_n.close()
                     st.rerun()
 
-    st.markdown("---")
-
-    # ── Task list ─────────────────────────────────────────────────────────────
     undone_tasks = [t for t in tasks if not t[5]]
     done_tasks   = [t for t in tasks if t[5]]
-    today_str    = date.today().isoformat()
 
     PRESET_COLORS = [
-        ("Kein", ""),
-        ("🟡 Gelb",  "#ffd700"),
-        ("🔴 Rot",   "#e74c3c"),
-        ("🟢 Grün",  "#2ecc71"),
-        ("🔵 Blau",  "#3498db"),
-        ("🟣 Lila",  "#9b59b6"),
-        ("🟠 Orange","#f39c12"),
-        ("⚪ Weiß",  "#ecf0f1"),
+        ("Kein", ""), ("🟡", "#ffd700"), ("🔴", "#e74c3c"), ("🟢", "#2ecc71"),
+        ("🔵", "#3498db"), ("🟣", "#9b59b6"), ("🟠", "#f39c12"),
     ]
 
     if undone_tasks:
-        st.subheader(f"📋 Offen ({len(undone_tasks)})")
+        st.markdown(f"**📋 Aufgaben ({len(undone_tasks)} offen)**")
         for i, t in enumerate(undone_tasks):
             task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes, hl_color = t
-            is_today   = scheduled_date == today_str
-            border_c   = hl_color if hl_color else ("#ffd700" if is_today else color)
-            card_bg    = f"{hl_color}12" if hl_color else ("rgba(255,215,0,0.06)" if is_today else "rgba(255,255,255,0.03)")
-            edit_open  = st.session_state.get(f"pt_edit_{task_id}", False)
+            is_today  = scheduled_date == today_str
+            border_c  = hl_color if hl_color else (color if is_today else 'rgba(255,255,255,0.12)')
+            card_bg   = f"{hl_color}12" if hl_color else (f"{color}12" if is_today else "rgba(255,255,255,0.02)")
+            edit_open = st.session_state.get(f"pt_edit_{task_id}", False)
 
+            today_badge = (
+                f'<span style="font-size:9px;font-weight:800;color:{color};background:{color}18;'
+                f'border:1px solid {color}44;padding:2px 7px;border-radius:5px;margin-left:8px">HEUTE</span>'
+            ) if is_today else ''
+            date_badge = (
+                f'<span class="dl-badge">{scheduled_date}</span>'
+                if scheduled_date and not is_today else ''
+            )
             notes_preview = (
-                f'<div style="font-size:11px;color:rgba(255,255,255,.45);margin-top:5px;'
-                f'white-space:pre-wrap;border-left:2px solid rgba(255,255,255,.15);padding-left:8px">'
-                f'{notes[:160]}{"…" if len(notes)>160 else ""}</div>'
-            ) if notes and not edit_open else ""
+                f'<div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:5px;'
+                f'white-space:pre-wrap;border-left:2px solid rgba(255,255,255,.12);padding-left:8px">'
+                f'{notes[:200]}{"…" if len(notes) > 200 else ""}</div>'
+            ) if notes and not edit_open else ''
 
             st.markdown(
-                f'<div style="border-left:4px solid {border_c};background:{card_bg};'
-                f'border-radius:10px;padding:10px 16px;margin-bottom:2px">'
-                f'<strong style="font-size:14px">{content}</strong>'
-                + (f'<span class="dl-badge" style="color:#ffd700">📅 Heute</span>' if is_today else
-                   f'<span class="dl-badge">{scheduled_date}</span>' if scheduled_date else "")
-                + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else "")
-                + (f'<span class="dl-badge">★ {priority}</span>' if priority else "")
-                + notes_preview + '</div>', unsafe_allow_html=True
+                f'<div style="border-left:3px solid {border_c};background:{card_bg};'
+                f'border-radius:0 10px 10px 0;padding:10px 14px;margin-bottom:3px">'
+                f'<div style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">'
+                f'<strong style="font-size:13.5px">{content}</strong>'
+                f'{today_badge}{date_badge}'
+                + (f'<span class="dl-badge">⏱️ {estimate} min</span>' if estimate else '')
+                + f'</div>{notes_preview}</div>',
+                unsafe_allow_html=True
             )
 
-            # Action row
             cc, cup, cdn, cedit, cdel = st.columns([0.06, 0.06, 0.06, 0.16, 0.06])
             with cc:
                 if st.checkbox("", value=False, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
@@ -6477,12 +8237,12 @@ def _render_project_detail(project_id):
                     move_project_task(task_id, -1, pid)
                     st.rerun()
             with cdn:
-                if i < len(undone_tasks)-1 and st.button("↓", key=f"pt_dn_{task_id}", use_container_width=True):
+                if i < len(undone_tasks) - 1 and st.button("↓", key=f"pt_dn_{task_id}", use_container_width=True):
                     move_project_task(task_id, 1, pid)
                     st.rerun()
             with cedit:
-                edit_lbl = "✕ Schließen" if edit_open else "✏️ Bearbeiten"
-                if st.button(edit_lbl, key=f"pt_editbtn_{task_id}", use_container_width=True):
+                if st.button("✕ Schließen" if edit_open else "✏️ Bearbeiten",
+                             key=f"pt_editbtn_{task_id}", use_container_width=True):
                     st.session_state[f"pt_edit_{task_id}"] = not edit_open
                     st.rerun()
             with cdel:
@@ -6491,52 +8251,36 @@ def _render_project_detail(project_id):
                     st.session_state.pop(f"pt_edit_{task_id}", None)
                     st.rerun()
 
-            # Inline full editor
             if edit_open:
                 with st.form(f"pt_edit_form_{task_id}"):
                     new_content = st.text_input("Aufgabe", value=content, key=f"pe_cnt_{task_id}")
-
                     ea, eb, ec = st.columns(3)
                     with ea:
                         new_est = st.number_input("⏱️ Minuten", min_value=1, step=5,
                                                    value=int(estimate or 30), key=f"pe_est_{task_id}")
                     with eb:
-                        new_prio = st.slider("★ Priorität", 0, 10,
-                                             value=int(priority or 5), key=f"pe_prio_{task_id}")
+                        new_prio = st.slider("Priorität", 0, 10, value=int(priority or 5),
+                                             key=f"pe_prio_{task_id}")
                     with ec:
                         try:
                             sd_val = date.fromisoformat(scheduled_date) if scheduled_date else date.today()
                         except Exception:
                             sd_val = date.today()
-                        new_date = st.date_input("📅 Datum", value=sd_val, key=f"pe_date_{task_id}")
-
-                    # Color picker row
-                    st.markdown("**🎨 Hervorhebungsfarbe**")
-                    color_cols = st.columns(len(PRESET_COLORS))
-                    selected_color = hl_color  # will be overridden by radio
+                        new_date = st.date_input("📅 Einplanen für", value=sd_val, key=f"pe_date_{task_id}")
                     color_labels = [p[0] for p in PRESET_COLORS]
                     cur_color_idx = next((i for i, p in enumerate(PRESET_COLORS) if p[1] == hl_color), 0)
                     chosen_label = st.radio("Farbe", color_labels, index=cur_color_idx,
                                             horizontal=True, label_visibility="collapsed",
                                             key=f"pe_color_{task_id}")
                     chosen_color = next((p[1] for p in PRESET_COLORS if p[0] == chosen_label), "")
-                    # Custom color picker
-                    use_custom = st.checkbox("Eigene Farbe", key=f"pe_custom_chk_{task_id}")
-                    if use_custom:
-                        chosen_color = st.color_picker("Farbe wählen",
-                                                        value=hl_color if hl_color else "#ffffff",
-                                                        key=f"pe_cpick_{task_id}")
-
-                    new_notes = st.text_area("📝 Notizen", value=notes or "", height=120,
-                                             placeholder="Gedanken, Links, Zwischenstände, Quellen...",
+                    new_notes = st.text_area("📝 Notizen", value=notes or "", height=100,
+                                             placeholder="Gedanken, Links, Zwischenstände...",
                                              key=f"pe_notes_{task_id}")
-
                     fs, fc = st.columns(2)
                     with fs:
                         if st.form_submit_button("💾 Speichern", use_container_width=True):
                             update_project_task(task_id, new_content.strip(), new_est, new_prio,
-                                                new_notes.strip(), chosen_color,
-                                                new_date.isoformat())
+                                                new_notes.strip(), chosen_color, new_date.isoformat())
                             st.session_state.pop(f"pt_edit_{task_id}", None)
                             st.rerun()
                     with fc:
@@ -6545,41 +8289,71 @@ def _render_project_detail(project_id):
                             st.rerun()
 
             st.markdown('<div style="margin-bottom:2px"></div>', unsafe_allow_html=True)
+    else:
+        if total == 0:
+            st.info("Noch keine Aufgaben — füge deine erste Aufgabe oben hinzu.")
+        else:
+            st.success("Alle Aufgaben erledigt!")
 
     if done_tasks:
         with st.expander(f"✅ Erledigt ({len(done_tasks)})"):
             for t in done_tasks:
-                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, order_idx, notes, hl_color = t
-                st.markdown(f'<div style="opacity:.4;text-decoration:line-through;padding:4px 0">{content}'
-                            + (f' <small>({estimate} min)</small>' if estimate else '') + '</div>',
-                            unsafe_allow_html=True)
+                task_id, _, content, estimate, priority, done_val, completed_at, scheduled_date, order_idx, notes, hl_color = t
+                st.markdown(
+                    f'<div style="opacity:.4;text-decoration:line-through;padding:4px 0;font-size:13px">'
+                    f'{content}</div>',
+                    unsafe_allow_html=True
+                )
                 c1, _ = st.columns([0.10, 0.90])
                 with c1:
-                    if not st.checkbox("", value=True, key=f"pt_chk_{task_id}", label_visibility="collapsed"):
+                    if not st.checkbox("", value=True, key=f"pt_chk_{task_id}",
+                                       label_visibility="collapsed"):
                         toggle_project_task_done(task_id, False)
                         st.rerun()
 
     # ── Visualizations ────────────────────────────────────────────────────────
     if tasks:
         st.markdown("---")
-        st.subheader("📊 Zeitplan & Fortschritt")
+        st.subheader("📊 Fortschritt")
 
-        tab1, tab2, tab3 = st.tabs(["Gantt-Zeitplan", "Burndown", "🔮 Prognose"])
+        tab1, tab2, tab3 = st.tabs(["Burndown", "Gantt", "🔮 Prognose"])
 
         with tab1:
+            if done_tasks:
+                from collections import Counter
+                done_dates = [t[6][:10] for t in done_tasks if t[6]]
+                if done_dates:
+                    counts = Counter(done_dates)
+                    df_b = pd.DataFrame(sorted(counts.items()), columns=['Datum', 'Neu_erledigt'])
+                    df_b['Kumulativ'] = df_b['Neu_erledigt'].cumsum()
+                    fig_b = go.Figure()
+                    fig_b.add_trace(go.Scatter(
+                        x=df_b['Datum'], y=df_b['Kumulativ'],
+                        mode='lines+markers', name='Erledigt',
+                        line=dict(color=color, width=3),
+                        fill='tozeroy', fillcolor=f'{color}18'
+                    ))
+                    fig_b.add_hline(y=total, line_dash="dash", line_color="rgba(255,255,255,0.3)",
+                                     annotation_text=f"Gesamt: {total}")
+                    fig_b.update_layout(template='plotly_dark', showlegend=False,
+                                         yaxis_title="Aufgaben erledigt")
+                    st.plotly_chart(fig_b, use_container_width=True)
+            else:
+                st.info("Erledige Aufgaben um den Fortschritt zu sehen.")
+
+        with tab2:
             gantt_data = []
             for t in tasks:
-                task_id, _, content, estimate, priority, done, completed_at, scheduled_date, _, _, _ = t
+                task_id, _, content, estimate, priority, done_val, completed_at, scheduled_date, _, _, _ = t
                 if scheduled_date:
                     try:
-                        start_dt = datetime.combine(date.fromisoformat(scheduled_date),
-                                                     datetime.min.time())
+                        start_dt = datetime.combine(date.fromisoformat(scheduled_date), datetime.min.time())
                         end_dt = start_dt + timedelta(minutes=max(estimate or 30, 15))
                         gantt_data.append({
-                            'Aufgabe': (content[:35] + '…') if len(content) > 35 else content,
+                            'Aufgabe': (content[:40] + '…') if len(content) > 40 else content,
                             'Start': start_dt.strftime('%Y-%m-%d %H:%M:%S'),
                             'Ende':  end_dt.strftime('%Y-%m-%d %H:%M:%S'),
-                            'Status': 'Erledigt' if done else 'Offen',
+                            'Status': 'Erledigt' if done_val else 'Offen',
                         })
                     except Exception:
                         pass
@@ -6590,41 +8364,23 @@ def _render_project_detail(project_id):
                                      color_discrete_map={'Erledigt': '#4ade80', 'Offen': color},
                                      template='plotly_dark')
                 fig_g.update_yaxes(autorange="reversed")
-                fig_g.add_vline(x=datetime.combine(date.today(), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
-                                 line_dash="dash", line_color="#ffd700",
-                                 annotation_text="Heute", annotation_font_color="#ffd700")
+                fig_g.add_vline(
+                    x=datetime.combine(date.today(), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                    line_dash="dash", line_color="#ffd700",
+                    annotation_text="Heute", annotation_font_color="#ffd700"
+                )
                 if deadline:
-                    fig_g.add_vline(x=datetime.combine(date.fromisoformat(deadline), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
-                                     line_dash="dot", line_color="#ef4444",
-                                     annotation_text="Deadline", annotation_font_color="#ef4444")
+                    try:
+                        fig_g.add_vline(
+                            x=datetime.combine(date.fromisoformat(deadline), datetime.min.time()).strftime('%Y-%m-%d %H:%M:%S'),
+                            line_dash="dot", line_color="#ef4444",
+                            annotation_text="Deadline", annotation_font_color="#ef4444"
+                        )
+                    except Exception:
+                        pass
                 st.plotly_chart(fig_g, use_container_width=True)
             else:
-                st.info("Plane Aufgaben ein um den Zeitplan zu sehen.")
-
-        with tab2:
-            if done_tasks:
-                from collections import Counter
-                done_dates = [t[6][:10] for t in done_tasks if t[6]]
-                if done_dates:
-                    counts = Counter(done_dates)
-                    df_b = pd.DataFrame(sorted(counts.items()), columns=['Datum', 'Neu_erledigt'])
-                    df_b['Kumulativ'] = df_b['Neu_erledigt'].cumsum()
-
-                    fig_b = go.Figure()
-                    fig_b.add_trace(go.Scatter(
-                        x=df_b['Datum'], y=df_b['Kumulativ'],
-                        mode='lines+markers', name='Erledigt',
-                        line=dict(color='#4ade80', width=3),
-                        fill='tozeroy', fillcolor='rgba(74,222,128,0.08)'
-                    ))
-                    fig_b.add_hline(y=total, line_dash="dash", line_color="#60a5fa",
-                                     annotation_text=f"Gesamt: {total} Aufgaben",
-                                     annotation_font_color="#60a5fa")
-                    fig_b.update_layout(template='plotly_dark', showlegend=False,
-                                         yaxis_title="Aufgaben erledigt")
-                    st.plotly_chart(fig_b, use_container_width=True)
-            else:
-                st.info("Erledige Aufgaben um den Fortschritt zu sehen.")
+                st.info("Tasks werden hier angezeigt sobald sie einen Termin haben.")
 
         with tab3:
             _render_project_forecast(pid, tasks, deadline, daily_minutes)
@@ -7416,152 +9172,1490 @@ def render_season_pass_page():
             st.markdown(f"**{s['icon']} Season {s['id']}: {s['name']}** — {status}")
 
 
+_KI_STATS_SYSTEM = """Du bist ein datengetriebener Produktivitäts-Analyst mit ADHS-Coaching-Expertise.
+Analysiere die Statistikdaten und liefere präzise, actionable Insights auf Deutsch.
+
+DEINE ANALYSE MUSS:
+1. MUSTER erkennen — positiv UND negativ, mit konkreten Zahlen
+2. PROBLEME identifizieren — was funktioniert NICHT, mit Datenbeweis
+3. LÖSUNGEN liefern — spezifisch, umsetzbar, mit Zeitangaben
+4. KORRELATIONEN aufdecken — welche Faktoren beeinflussen was?
+
+STIL für ADHS-Coaching:
+- Direkt und ohne Floskeln
+- Konkrete Uhrzeiten, Prozente, Zahlen nennen
+- Keine allgemeinen Ratschläge — NUR was die Daten zeigen
+
+OUTPUT: Nur valides JSON:
+{
+  "top_pattern": "Ein Satz — das wichtigste Muster mit konkreten Daten",
+  "patterns": [
+    {"icon": "emoji", "title": "Kurztitel", "evidence": "Konkrete Datenbasis mit Zahlen", "type": "positive|neutral|negative"}
+  ],
+  "problems": [
+    {"title": "Problemtitel", "evidence": "Daten-Beweis mit Zahlen", "severity": "hoch|mittel|niedrig", "icon": "emoji"}
+  ],
+  "solutions": [
+    {"problem": "Auf welches Problem bezogen", "action": "Konkrete Aktion mit Uhrzeit/Zahl", "why": "Daten-Begründung", "icon": "emoji"}
+  ],
+  "correlations": [
+    {"factor_a": "...", "factor_b": "...", "insight": "Was die Daten zeigen", "icon": "emoji"}
+  ],
+  "energy_insight": "Optimale Tagesstruktur in 2-3 Sätzen basierend auf den Daten"
+}"""
+
+
+def ki_analyze_statistics(api_key):
+    """KI analysiert alle Statistikdaten: Muster, Probleme, Lösungen, Korrelationen."""
+    conn = sqlite3.connect(DB_PATH)
+
+    hour_data = conn.execute("""
+        SELECT CAST(strftime('%H', completed_at) AS INTEGER) as h,
+               COUNT(*) as n, AVG(elapsed_seconds) as avg_secs
+        FROM entries WHERE done=1 AND completed_at IS NOT NULL
+        GROUP BY h ORDER BY h
+    """).fetchall()
+
+    wd_data = conn.execute("""
+        SELECT strftime('%w', entry_date) as wd,
+               COUNT(*) as tasks, ROUND(AVG(done)*100,0) as done_rate
+        FROM entries WHERE entry_date >= date('now','-60 days') GROUP BY wd
+    """).fetchall()
+
+    start_times = conn.execute("""
+        SELECT entry_date, strftime('%H:%M', MIN(started_at)) as first_start, COUNT(*) as tasks_done
+        FROM entries WHERE done=1 AND started_at IS NOT NULL
+        AND entry_date >= date('now','-30 days')
+        GROUP BY entry_date ORDER BY entry_date DESC LIMIT 20
+    """).fetchall()
+
+    sleep_prod = conn.execute("""
+        SELECT s.quality_pct,
+               (SELECT COUNT(*) FROM entries e WHERE e.entry_date = date(s.log_date,'+1 day') AND e.done=1) as tasks_next
+        FROM sleep_logs s WHERE s.log_date >= date('now','-30 days') AND s.quality_pct IS NOT NULL
+    """).fetchall()
+
+    sleep_avg = conn.execute(
+        "SELECT AVG(quality_pct) FROM sleep_logs WHERE log_date >= date('now','-30 days')"
+    ).fetchone()[0]
+
+    habit_cons = conn.execute("""
+        SELECT h.name,
+               COALESCE(SUM(CASE WHEN hl.log_date >= date('now','-30 days') THEN 1 ELSE 0 END),0) as last_30,
+               COALESCE(SUM(CASE WHEN hl.log_date >= date('now','-7 days') THEN 1 ELSE 0 END),0) as last_7
+        FROM habits h LEFT JOIN habit_logs hl ON h.id = hl.habit_id GROUP BY h.id
+    """).fetchall()
+
+    routine_adh = conn.execute("""
+        SELECT routine, ROUND(AVG(done)*100,0) as avg_pct
+        FROM routine_checks WHERE log_date >= date('now','-30 days') GROUP BY routine
+    """).fetchall()
+
+    train_cons = conn.execute("""
+        SELECT COUNT(DISTINCT session_date) as days, ROUND(AVG(clean)*100,0) as clean_pct
+        FROM cal_sessions WHERE session_date >= date('now','-30 days')
+    """).fetchone()
+
+    est_acc = conn.execute("""
+        SELECT AVG((elapsed_seconds/60.0 - estimate_minutes) / NULLIF(estimate_minutes,0) * 100) as avg_err
+        FROM entries WHERE done=1 AND estimate_minutes > 0 AND elapsed_seconds > 30
+    """).fetchone()
+
+    weekly_rate = conn.execute("""
+        SELECT strftime('%Y-W%W', entry_date) as week,
+               ROUND(AVG(done)*100,0) as rate, COUNT(*) as tasks
+        FROM entries WHERE entry_date >= date('now','-60 days')
+        GROUP BY week ORDER BY week
+    """).fetchall()
+
+    dur_stats = conn.execute("""
+        SELECT AVG(elapsed_seconds)/60.0 as avg_min,
+               COUNT(CASE WHEN elapsed_seconds < 300 THEN 1 END) as unter5,
+               COUNT(CASE WHEN elapsed_seconds >= 1800 THEN 1 END) as ueber30
+        FROM entries WHERE done=1 AND elapsed_seconds > 30
+    """).fetchone()
+
+    conn.close()
+
+    wd_names = {0:'So',1:'Mo',2:'Di',3:'Mi',4:'Do',5:'Fr',6:'Sa'}
+    peak_hours = sorted(hour_data, key=lambda x: x[1], reverse=True)[:3]
+    summary = {
+        "produktivitaet_nach_stunde": [
+            {"stunde": r[0], "aufgaben": r[1], "avg_min": round((r[2] or 0)/60,1)} for r in hour_data
+        ],
+        "peak_stunden": [f"{r[0]}h ({r[1]} Aufg.)" for r in peak_hours],
+        "wochentag_aufgaben": [
+            {"tag": wd_names.get(int(r[0]),'?'), "aufgaben": r[1], "rate_pct": r[2]} for r in wd_data
+        ],
+        "tagesstart_muster": [
+            {"datum": r[0], "erste_aufgabe": r[1], "aufgaben_erledigt": r[2]} for r in start_times[:10]
+        ],
+        "schlaf_prod_korrelation": [
+            {"schlaf_pct": r[0], "aufgaben_folgetag": r[1]} for r in sleep_prod
+        ],
+        "schlaf_avg_pct": round(sleep_avg or 0, 0),
+        "habits": [
+            {"name": r[0], "30d_von_30": r[1], "7d_von_7": r[2]} for r in habit_cons
+        ],
+        "routinen": [{"routine": r[0], "adhaerenz_pct": r[1]} for r in routine_adh],
+        "training_30d": {
+            "trainingstage": train_cons[0] if train_cons else 0,
+            "clean_rate_pct": train_cons[1] if train_cons else 0
+        },
+        "schaetzfehler_avg_pct": round(est_acc[0] or 0, 1) if est_acc and est_acc[0] else None,
+        "wochentliche_rate": [{"woche": r[0], "rate_pct": r[1]} for r in weekly_rate],
+        "session_stats": {
+            "avg_min": round(dur_stats[0] or 0, 1) if dur_stats else 0,
+            "unter_5min": dur_stats[1] if dur_stats else 0,
+            "ueber_30min": dur_stats[2] if dur_stats else 0,
+        }
+    }
+
+    try:
+        from openai import OpenAI
+        client = OpenAI(base_url=NVIDIA_BASE_URL, api_key=api_key)
+        resp = client.chat.completions.create(
+            model=KIMI_MODEL,
+            messages=[
+                {"role": "system", "content": _KI_STATS_SYSTEM},
+                {"role": "user", "content": f"Analysiere diese Statistikdaten:\n\n{json.dumps(summary, ensure_ascii=False, indent=2)}"}
+            ],
+            temperature=0.35, max_tokens=2500
+        )
+        return _parse_ki_json(resp.choices[0].message.content)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def render_statistics_page():
-    st.markdown(URGENCY_CSS, unsafe_allow_html=True)
     st.title("📊 Statistiken")
 
-    stats = get_analytics_stats()
-    records = get_personal_records()
-    rate = (stats['completed'] / stats['total'] * 100) if stats['total'] > 0 else 0
+    conn = sqlite3.connect(DB_PATH)
 
-    # ── KPI Cards ─────────────────────────────────────────────────
-    kpi = "text-align:center;background:rgba(255,255,255,0.05);border-radius:12px;padding:16px 8px;border:1px solid rgba(255,255,255,0.09)"
-    k1, k2, k3, k4, k5 = st.columns(5)
-    k1.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#00d4ff">{stats["completed"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">✅ Erledigt</div></div>', unsafe_allow_html=True)
-    k2.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:white">{stats["total"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📝 Gesamt</div></div>', unsafe_allow_html=True)
-    k3.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#ffd700">{rate:.1f}%</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📈 Erfolgsquote</div></div>', unsafe_allow_html=True)
-    k4.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#ff9500">{records["total_hours"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">⏱️ Fokus-Stunden</div></div>', unsafe_allow_html=True)
-    k5.markdown(f'<div style="{kpi}"><div style="font-size:32px;font-weight:900;color:#00ff88">{records["active_days_30"]}</div><div style="color:rgba(255,255,255,0.45);font-size:11px;margin-top:4px">📅 Aktive Tage (30d)</div></div>', unsafe_allow_html=True)
+    # ── Alle Kern-KPIs laden ───────────────────────────────────────
+    total       = conn.execute("SELECT COUNT(*) FROM entries").fetchone()[0]
+    done        = conn.execute("SELECT COUNT(*) FROM entries WHERE done=1").fetchone()[0]
+    total_secs  = conn.execute("SELECT COALESCE(SUM(elapsed_seconds),0) FROM entries WHERE done=1").fetchone()[0]
+    active_30   = conn.execute("SELECT COUNT(DISTINCT DATE(completed_at)) FROM entries WHERE done=1 AND completed_at >= datetime('now','-30 days')").fetchone()[0]
+    total_pts   = conn.execute("SELECT COALESCE(SUM(points),0) FROM entries WHERE done=1").fetchone()[0]
+    train_days  = conn.execute("SELECT COUNT(DISTINCT session_date) FROM cal_sessions").fetchone()[0]
+    habit_30    = conn.execute("SELECT COUNT(*) FROM habit_logs WHERE log_date >= date('now','-30 days')").fetchone()[0]
+    avg_sleep_q = conn.execute("SELECT AVG(quality_pct) FROM sleep_logs WHERE log_date >= date('now','-30 days')").fetchone()[0]
+    cur_streak  = get_cal_streak()['current']
+    conn.close()
+
+    rate = done / total * 100 if total else 0
+    hours_total = round(total_secs / 3600, 1)
+
+    # ── 8 KPI Cards ────────────────────────────────────────────────
+    kpi = ("text-align:center;background:rgba(255,255,255,0.04);border-radius:14px;"
+           "padding:14px 6px;border:1px solid rgba(255,255,255,0.08)")
+    kpis = [
+        (str(done),         "#00d4ff", "✅ Erledigt"),
+        (f"{rate:.0f}%",    "#ffd700", "📈 Quote"),
+        (f"{hours_total}h", "#ff9500", "⏱️ Fokuszeit"),
+        (str(active_30),    "#2ecc71", "📅 Aktive Tage"),
+        (str(train_days),   "#a29bfe", "🏋️ Trainingstage"),
+        (f"{cur_streak}🔥", "#ff6b6b", "Streak"),
+        (str(habit_30),     "#74b9ff", "✅ Habits (30d)"),
+        (f"{avg_sleep_q:.0f}%" if avg_sleep_q else "—", "#dfe6e9", "😴 Ø Schlaf"),
+    ]
+    cols = st.columns(8)
+    for col, (val, color, label) in zip(cols, kpis):
+        col.markdown(
+            f'<div style="{kpi}"><div style="font-size:24px;font-weight:900;color:{color}">{val}</div>'
+            f'<div style="color:rgba(255,255,255,0.4);font-size:10px;margin-top:4px">{label}</div></div>',
+            unsafe_allow_html=True
+        )
 
     st.write("")
 
-    # ── Charts Row 1: Typ-Verteilung + Wochentag ──────────────────
-    col_l, col_r = st.columns(2)
+    # ── Tabs ──────────────────────────────────────────────────────
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "🏠 Überblick", "⏰ Zeitanalyse", "⏱️ Intraday",
+        "😴 Schlaf & Routinen", "✅ Habits", "🏋️ Training",
+        "📁 Projekte", "🤖 KI Analyse"
+    ])
 
-    with col_l:
-        st.subheader("Aufgaben nach Typ")
-        if stats['type_stats']:
-            df_t = pd.DataFrame(stats['type_stats'], columns=['Type','Count','Avg_Sec','Total_Sec'])
-            df_t['Avg_Min'] = (df_t['Avg_Sec'] / 60).round(1)
-            fig_pie = px.pie(df_t, values='Count', names='Type',
-                             color_discrete_sequence=['#00d4ff','#ff6b6b','#ffd93d'],
-                             hole=0.45)
-            fig_pie.update_traces(textfont_size=13, textinfo='label+percent')
-            fig_pie.update_layout(paper_bgcolor='rgba(0,0,0,0)', showlegend=True,
-                                   font=dict(color='white'), margin=dict(t=10,b=10))
-            st.plotly_chart(fig_pie, use_container_width=True)
-        else:
-            st.info("Noch keine erledigten Aufgaben")
+    _DARK = dict(template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
+                 plot_bgcolor='rgba(5,8,15,0.5)',
+                 font=dict(color='white'))
+    _GRID = dict(gridcolor='rgba(255,255,255,0.06)')
 
-    with col_r:
-        st.subheader("Produktivster Wochentag")
-        wd_stats = get_weekday_stats()
-        if wd_stats:
-            wd_map = {0:"So",1:"Mo",2:"Di",3:"Mi",4:"Do",5:"Fr",6:"Sa"}
-            wd_df = pd.DataFrame(wd_stats, columns=['wd','tasks','secs'])
-            wd_df['day'] = wd_df['wd'].map(wd_map)
-            wd_df['Minuten'] = (wd_df['secs'] / 60).round(1)
-            # Sort Mon-Sun
-            order = ["Mo","Di","Mi","Do","Fr","Sa","So"]
-            wd_df['day'] = pd.Categorical(wd_df['day'], categories=order, ordered=True)
-            wd_df = wd_df.sort_values('day')
-            fig_wd = go.Figure(go.Bar(
-                x=wd_df['day'], y=wd_df['tasks'],
-                marker=dict(
-                    color=wd_df['tasks'],
-                    colorscale=[[0,'rgba(0,212,255,0.3)'],[1,'#00d4ff']],
-                    showscale=False
-                ),
-                text=wd_df['tasks'], textposition='outside',
-                hovertemplate='%{x}: %{y} Aufgaben<extra></extra>'
+    # ══════════════════════════════════════════════════════════════
+    # TAB 1 — ÜBERBLICK
+    # ══════════════════════════════════════════════════════════════
+    with tab1:
+        # 365-Tage GitHub-Heatmap
+        st.subheader("📅 Aktivitäts-Jahresrückblick (365 Tage)")
+        conn2 = sqlite3.connect(DB_PATH)
+        rows_365 = conn2.execute("""
+            SELECT DATE(completed_at) as d, COUNT(*) as n
+            FROM entries WHERE done=1 AND completed_at IS NOT NULL
+            AND completed_at >= datetime('now','-365 days')
+            GROUP BY d
+        """).fetchall()
+        conn2.close()
+
+        if rows_365:
+            day_counts = {r[0]: r[1] for r in rows_365}
+            today_d = date.today()
+            # Build 52-week grid
+            start_d = today_d - timedelta(days=364)
+            # Align to Monday
+            start_d = start_d - timedelta(days=start_d.weekday())
+            grid = []  # grid[week][weekday] = count
+            cur = start_d
+            week_data, labels = [], []
+            while cur <= today_d + timedelta(days=6):
+                week = []
+                for wd in range(7):
+                    d = cur + timedelta(days=wd)
+                    week.append(day_counts.get(d.isoformat(), 0) if d <= today_d else None)
+                week_data.append(week)
+                labels.append(cur.strftime('%d.%m'))
+                cur += timedelta(weeks=1)
+
+            z = list(map(list, zip(*week_data)))  # transpose: 7 rows × N weeks
+            day_names = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So']
+
+            fig_hm = go.Figure(go.Heatmap(
+                z=z, x=labels, y=day_names,
+                colorscale=[[0, 'rgba(255,255,255,0.05)'], [0.01, '#0a3d2e'],
+                            [0.3, '#1a7a4a'], [0.7, '#2ecc71'], [1.0, '#00ff88']],
+                showscale=False, hoverongaps=False,
+                hovertemplate='%{x} %{y}: %{z} Aufgaben<extra></extra>',
+                xgap=2, ygap=2
             ))
-            fig_wd.update_layout(
-                template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(5,8,15,0.4)',
-                yaxis=dict(gridcolor='rgba(255,255,255,0.06)', title='Aufgaben'),
-                xaxis=dict(gridcolor='rgba(255,255,255,0.06)'),
-                margin=dict(t=10, b=30, l=40, r=10), height=280
+            fig_hm.update_layout(
+                **_DARK, height=180,
+                margin=dict(t=10, b=10, l=40, r=10),
+                xaxis=dict(showgrid=False, tickangle=0,
+                           tickvals=[labels[i] for i in range(0, len(labels), 4)],
+                           ticktext=[labels[i] for i in range(0, len(labels), 4)]),
+                yaxis=dict(showgrid=False, autorange='reversed')
             )
-            st.plotly_chart(fig_wd, use_container_width=True)
+            st.plotly_chart(fig_hm, use_container_width=True)
         else:
             st.info("Noch keine Daten")
 
-    st.markdown("---")
+        st.markdown("---")
 
-    # ── Täglicher Trend ────────────────────────────────────────────
-    st.subheader("Täglicher Fortschritt (30 Tage)")
-    if stats['daily_trend']:
-        df_d = pd.DataFrame(stats['daily_trend'], columns=['Date','Count','Total_Sec'])
-        df_d['Minuten'] = (df_d['Total_Sec'] / 60).round(1)
-        fig_trend = go.Figure()
-        fig_trend.add_trace(go.Scatter(
-            x=df_d['Date'], y=df_d['Count'], mode='lines+markers', name='Aufgaben',
-            line=dict(color='#00d4ff', width=3),
-            fill='tozeroy', fillcolor='rgba(0,212,255,0.08)'
-        ))
-        fig_trend.add_trace(go.Scatter(
-            x=df_d['Date'], y=df_d['Minuten'], mode='lines+markers', name='Minuten',
-            line=dict(color='#ff6b6b', width=2, dash='dot'),
-            yaxis='y2'
-        ))
-        fig_trend.update_layout(
-            hovermode='x unified', template='plotly_dark',
-            paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(5,8,15,0.4)',
-            yaxis=dict(title='Aufgaben', gridcolor='rgba(255,255,255,0.06)'),
-            yaxis2=dict(title='Minuten', overlaying='y', side='right',
-                        gridcolor='rgba(255,255,255,0.04)'),
-            margin=dict(t=10, b=40, l=50, r=60), height=300,
-            legend=dict(orientation='h', yanchor='bottom', y=1.02, x=0)
-        )
-        st.plotly_chart(fig_trend, use_container_width=True)
-    else:
-        st.info("Noch keine Daten für den Trend")
+        cl, cr = st.columns(2)
 
-    st.markdown("---")
+        with cl:
+            # Täglicher Trend 30 Tage
+            st.subheader("Täglicher Fortschritt (30 Tage)")
+            conn3 = sqlite3.connect(DB_PATH)
+            trend = conn3.execute("""
+                SELECT DATE(completed_at) as d, COUNT(*), SUM(elapsed_seconds)
+                FROM entries WHERE done=1 AND completed_at IS NOT NULL
+                AND completed_at >= datetime('now','-30 days')
+                GROUP BY d ORDER BY d
+            """).fetchall()
+            conn3.close()
+            if trend:
+                df_trend = pd.DataFrame(trend, columns=['Datum','Aufgaben','Sek'])
+                df_trend['Min'] = (df_trend['Sek'] / 60).round(0)
+                fig_t = go.Figure()
+                fig_t.add_trace(go.Bar(x=df_trend['Datum'], y=df_trend['Aufgaben'],
+                                        name='Aufgaben', marker_color='rgba(0,212,255,0.7)',
+                                        hovertemplate='%{x}: %{y} Aufgaben<extra></extra>'))
+                fig_t.add_trace(go.Scatter(x=df_trend['Datum'], y=df_trend['Min'],
+                                            name='Minuten', line=dict(color='#ffd700', width=2),
+                                            yaxis='y2', mode='lines+markers',
+                                            hovertemplate='%{x}: %{y} Min<extra></extra>'))
+                fig_t.update_layout(**_DARK, height=280,
+                                     yaxis=dict(title='Aufgaben', **_GRID),
+                                     yaxis2=dict(title='Min', overlaying='y', side='right', **_GRID),
+                                     margin=dict(t=10,b=30,l=40,r=50), hovermode='x unified',
+                                     legend=dict(orientation='h', y=1.05, x=0))
+                st.plotly_chart(fig_t, use_container_width=True)
+            else:
+                st.info("Keine Daten")
 
-    # ── Ø Dauer pro Typ ────────────────────────────────────────────
-    col_a, col_b = st.columns(2)
-    with col_a:
-        st.subheader("Ø Fokus-Zeit pro Typ")
-        if stats['type_stats']:
-            df_t2 = pd.DataFrame(stats['type_stats'], columns=['Type','Count','Avg_Sec','Total_Sec'])
-            df_t2['Avg_Min'] = (df_t2['Avg_Sec'] / 60).round(1)
-            fig_bar = px.bar(df_t2, x='Type', y='Avg_Min', color='Type', text='Avg_Min',
-                              color_discrete_sequence=['#00d4ff','#ff6b6b','#ffd93d'])
-            fig_bar.update_traces(texttemplate='%{text} Min', textposition='outside')
-            fig_bar.update_layout(
-                template='plotly_dark', paper_bgcolor='rgba(0,0,0,0)',
-                plot_bgcolor='rgba(5,8,15,0.4)', showlegend=False,
-                yaxis=dict(title='Minuten', gridcolor='rgba(255,255,255,0.06)'),
-                margin=dict(t=10, b=30, l=50, r=10), height=280
-            )
-            st.plotly_chart(fig_bar, use_container_width=True)
+        with cr:
+            # Wochentag-Produktivität
+            st.subheader("Produktivster Wochentag")
+            conn4 = sqlite3.connect(DB_PATH)
+            wd_rows = conn4.execute("""
+                SELECT CAST(strftime('%w', completed_at) AS INTEGER) as wd,
+                       COUNT(*), SUM(elapsed_seconds)
+                FROM entries WHERE done=1 AND completed_at IS NOT NULL
+                GROUP BY wd
+            """).fetchall()
+            conn4.close()
+            if wd_rows:
+                wd_map = {0:'So',1:'Mo',2:'Di',3:'Mi',4:'Do',5:'Fr',6:'Sa'}
+                df_wd = pd.DataFrame(wd_rows, columns=['wd','n','secs'])
+                df_wd['tag'] = df_wd['wd'].map(wd_map)
+                df_wd['min'] = (df_wd['secs'] / 60).round(0)
+                order = ['Mo','Di','Mi','Do','Fr','Sa','So']
+                df_wd['tag'] = pd.Categorical(df_wd['tag'], categories=order, ordered=True)
+                df_wd = df_wd.sort_values('tag')
+                fig_wd = go.Figure(go.Bar(
+                    x=df_wd['tag'], y=df_wd['n'],
+                    marker=dict(color=df_wd['n'],
+                                colorscale=[[0,'rgba(162,155,254,0.2)'],[1,'#a29bfe']],
+                                showscale=False),
+                    text=df_wd['n'], textposition='outside',
+                    hovertemplate='%{x}: %{y} Aufgaben, %{customdata} Min<extra></extra>',
+                    customdata=df_wd['min']
+                ))
+                fig_wd.update_layout(**_DARK, height=280, yaxis=dict(title='Aufgaben', **_GRID),
+                                      margin=dict(t=10,b=30,l=40,r=10))
+                st.plotly_chart(fig_wd, use_container_width=True)
+            else:
+                st.info("Keine Daten")
+
+        st.markdown("---")
+
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            # Aufgaben nach Typ
+            st.subheader("Aufgaben nach Typ")
+            conn5 = sqlite3.connect(DB_PATH)
+            type_rows = conn5.execute(
+                "SELECT entry_type, COUNT(*) FROM entries WHERE done=1 GROUP BY entry_type"
+            ).fetchall()
+            conn5.close()
+            if type_rows:
+                df_tp = pd.DataFrame(type_rows, columns=['Typ','n'])
+                fig_pie = px.pie(df_tp, values='n', names='Typ', hole=0.45,
+                                  color_discrete_sequence=['#00d4ff','#ff6b6b','#ffd93d','#a29bfe'])
+                fig_pie.update_traces(textfont_size=12, textinfo='label+percent')
+                fig_pie.update_layout(**_DARK, margin=dict(t=10,b=10,l=10,r=10), height=260)
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+        with c2:
+            # Fokuszeit nach Typ
+            st.subheader("Ø Fokuszeit / Typ")
+            conn6 = sqlite3.connect(DB_PATH)
+            ft_rows = conn6.execute("""
+                SELECT entry_type, AVG(elapsed_seconds), SUM(elapsed_seconds)
+                FROM entries WHERE done=1 AND elapsed_seconds > 0 GROUP BY entry_type
+            """).fetchall()
+            conn6.close()
+            if ft_rows:
+                df_ft = pd.DataFrame(ft_rows, columns=['Typ','avg_s','tot_s'])
+                df_ft['avg_min'] = (df_ft['avg_s'] / 60).round(1)
+                fig_ft = go.Figure(go.Bar(
+                    x=df_ft['Typ'], y=df_ft['avg_min'],
+                    marker=dict(color=['#00d4ff','#ff6b6b','#ffd93d','#a29bfe'][:len(df_ft)]),
+                    text=df_ft['avg_min'].apply(lambda x: f'{x:.0f}m'),
+                    textposition='outside'
+                ))
+                fig_ft.update_layout(**_DARK, height=260, yaxis=dict(title='Minuten', **_GRID),
+                                      margin=dict(t=10,b=30,l=40,r=10), showlegend=False)
+                st.plotly_chart(fig_ft, use_container_width=True)
+
+        with c3:
+            # Persönliche Rekorde
+            st.subheader("🏆 Rekorde")
+            conn7 = sqlite3.connect(DB_PATH)
+            best_day = conn7.execute("""
+                SELECT DATE(completed_at), COUNT(*) FROM entries WHERE done=1 AND completed_at IS NOT NULL
+                GROUP BY DATE(completed_at) ORDER BY COUNT(*) DESC LIMIT 1
+            """).fetchone()
+            best_min = conn7.execute("""
+                SELECT DATE(completed_at), SUM(elapsed_seconds) FROM entries WHERE done=1 AND completed_at IS NOT NULL
+                GROUP BY DATE(completed_at) ORDER BY SUM(elapsed_seconds) DESC LIMIT 1
+            """).fetchone()
+            longest = conn7.execute("""
+                SELECT content, elapsed_seconds FROM entries WHERE done=1 AND elapsed_seconds > 0
+                ORDER BY elapsed_seconds DESC LIMIT 1
+            """).fetchone()
+            consec = conn7.execute("""
+                SELECT COUNT(DISTINCT entry_date) FROM entries WHERE done=1 AND entry_date >= date('now','-7 days')
+            """).fetchone()[0]
+            conn7.close()
+            rs = "background:rgba(255,255,255,0.04);border-radius:10px;padding:9px 14px;margin-bottom:7px;border:1px solid rgba(255,255,255,0.08);font-size:12px"
+            if best_day:
+                st.markdown(f'<div style="{rs}">🥇 <strong>Bester Tag:</strong> {best_day[0]} ({best_day[1]} Aufg.)</div>', unsafe_allow_html=True)
+            if best_min:
+                st.markdown(f'<div style="{rs}">⏱️ <strong>Meiste Fokuszeit:</strong> {best_min[0]} ({round(best_min[1]/60)} Min)</div>', unsafe_allow_html=True)
+            if longest:
+                nm = longest[0][:35] + '…' if len(longest[0]) > 35 else longest[0]
+                st.markdown(f'<div style="{rs}">🔥 <strong>Längste Session:</strong> {round(longest[1]/60)} Min<br><small style="color:rgba(255,255,255,0.4)">{nm}</small></div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="{rs}">📅 <strong>Aktive Tage (7d):</strong> {consec}/7</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="{rs}">🎯 <strong>Gesamt Fokuszeit:</strong> {round(total_secs/3600,1)} h</div>', unsafe_allow_html=True)
+            st.markdown(f'<div style="{rs}">🏅 <strong>Gesamt XP:</strong> {total_pts} Punkte</div>', unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 2 — ZEITANALYSE
+    # ══════════════════════════════════════════════════════════════
+    with tab2:
+        st.subheader("🕐 Produktivität nach Tagesstunde")
+        conn_h = sqlite3.connect(DB_PATH)
+        hour_rows = conn_h.execute("""
+            SELECT CAST(strftime('%H', completed_at) AS INTEGER) as h,
+                   COUNT(*), ROUND(SUM(elapsed_seconds)/60.0, 0)
+            FROM entries WHERE done=1 AND completed_at IS NOT NULL
+            GROUP BY h ORDER BY h
+        """).fetchall()
+        conn_h.close()
+        if hour_rows:
+            df_hr = pd.DataFrame(hour_rows, columns=['Stunde','Aufgaben','Minuten'])
+            all_hours = pd.DataFrame({'Stunde': range(24)})
+            df_hr = all_hours.merge(df_hr, on='Stunde', how='left').fillna(0)
+            peak_h = int(df_hr.loc[df_hr['Aufgaben'].idxmax(), 'Stunde'])
+            st.caption(f"Deine produktivste Stunde: **{peak_h}:00–{peak_h+1}:00 Uhr**")
+            colors = ['#ffd700' if h == peak_h else '#00d4ff' for h in df_hr['Stunde']]
+            fig_hr = go.Figure(go.Bar(
+                x=[f"{h}h" for h in df_hr['Stunde']], y=df_hr['Aufgaben'],
+                marker_color=colors, text=df_hr['Aufgaben'].astype(int),
+                textposition='outside',
+                hovertemplate='%{x}: %{y} Aufgaben, %{customdata} Min<extra></extra>',
+                customdata=df_hr['Minuten'].astype(int)
+            ))
+            fig_hr.update_layout(**_DARK, height=280, yaxis=dict(title='Aufgaben', **_GRID),
+                                  margin=dict(t=10,b=30,l=40,r=10))
+            st.plotly_chart(fig_hr, use_container_width=True)
         else:
-            st.info("Keine Daten")
+            st.info("Noch keine Zeitdaten")
 
-    # ── Personal Records ──────────────────────────────────────────
-    with col_b:
-        st.subheader("🏆 Persönliche Rekorde")
-        rec_style = ("background:rgba(255,255,255,0.04);border-radius:10px;"
-                     "padding:10px 14px;margin-bottom:8px;border:1px solid rgba(255,255,255,0.08)")
-        if records['best_day']:
-            st.markdown(f'<div style="{rec_style}">🥇 <strong>Bester Tag:</strong> '
-                        f'{records["best_day"][0]} — {records["best_day"][1]} Aufgaben</div>',
-                        unsafe_allow_html=True)
-        if records['best_time_day']:
-            mins = round(records['best_time_day'][1] / 60)
-            st.markdown(f'<div style="{rec_style}">⏱️ <strong>Meiste Fokuszeit:</strong> '
-                        f'{records["best_time_day"][0]} — {mins} Min</div>',
-                        unsafe_allow_html=True)
-        if records['longest']:
-            lmins = round(records['longest'][1] / 60)
-            name = records['longest'][0][:40] + "…" if len(records['longest'][0]) > 40 else records['longest'][0]
-            st.markdown(f'<div style="{rec_style}">🔥 <strong>Längste Session:</strong> '
-                        f'{lmins} Min<br><small style="color:rgba(255,255,255,0.4)">{name}</small></div>',
-                        unsafe_allow_html=True)
-        total_h = records['total_hours']
-        st.markdown(f'<div style="{rec_style}">🎯 <strong>Fokus-Zeit gesamt:</strong> '
-                    f'{total_h} Stunden</div>', unsafe_allow_html=True)
+        st.markdown("---")
+        cl2, cr2 = st.columns(2)
+
+        with cl2:
+            st.subheader("📅 Wochentag × Stunde Heatmap")
+            conn_wh = sqlite3.connect(DB_PATH)
+            wh_rows = conn_wh.execute("""
+                SELECT CAST(strftime('%w', completed_at) AS INTEGER) as wd,
+                       CAST(strftime('%H', completed_at) AS INTEGER) as h,
+                       COUNT(*)
+                FROM entries WHERE done=1 AND completed_at IS NOT NULL
+                GROUP BY wd, h
+            """).fetchall()
+            conn_wh.close()
+            if wh_rows:
+                import numpy as np
+                wd_names = ['So','Mo','Di','Mi','Do','Fr','Sa']
+                z_mat = [[0]*24 for _ in range(7)]
+                for wd, h, n in wh_rows:
+                    z_mat[wd][h] = n
+                # Reorder Mo-So
+                order_idx = [1,2,3,4,5,6,0]
+                z_ordered = [z_mat[i] for i in order_idx]
+                day_order = [wd_names[i] for i in order_idx]
+                fig_wh = go.Figure(go.Heatmap(
+                    z=z_ordered, x=[f"{h}h" for h in range(24)], y=day_order,
+                    colorscale=[[0,'rgba(0,212,255,0.03)'],[0.3,'rgba(0,212,255,0.3)'],
+                                [0.7,'#00d4ff'],[1,'#00ff88']],
+                    showscale=True,
+                    hovertemplate='%{y} %{x}: %{z} Aufgaben<extra></extra>',
+                    xgap=1, ygap=1
+                ))
+                fig_wh.update_layout(**_DARK, height=260,
+                                      margin=dict(t=10,b=30,l=40,r=10),
+                                      xaxis=dict(showgrid=False),
+                                      yaxis=dict(showgrid=False, autorange='reversed'))
+                st.plotly_chart(fig_wh, use_container_width=True)
+            else:
+                st.info("Noch keine Daten")
+
+        with cr2:
+            st.subheader("🎯 Schätzgenauigkeit")
+            conn_est = sqlite3.connect(DB_PATH)
+            est_rows = conn_est.execute("""
+                SELECT estimate_minutes, elapsed_seconds / 60.0 as actual_min, entry_type
+                FROM entries WHERE done=1 AND estimate_minutes > 0 AND elapsed_seconds > 30
+                ORDER BY completed_at DESC LIMIT 150
+            """).fetchall()
+            conn_est.close()
+            if est_rows:
+                df_est = pd.DataFrame(est_rows, columns=['Geschätzt','Actual','Typ'])
+                # Overall accuracy
+                df_est['Diff_pct'] = ((df_est['Actual'] - df_est['Geschätzt']) / df_est['Geschätzt'] * 100).round(0)
+                over = (df_est['Diff_pct'] > 20).sum()
+                under = (df_est['Diff_pct'] < -20).sum()
+                exact = len(df_est) - over - under
+                st.caption(f"Letzte 150 Aufgaben: **{exact}** genau, **{over}** unterschätzt, **{under}** überschätzt")
+                max_val = max(df_est['Geschätzt'].max(), df_est['Actual'].max(), 1)
+                fig_est = go.Figure()
+                fig_est.add_trace(go.Scatter(x=[0, max_val], y=[0, max_val],
+                                              mode='lines', line=dict(color='rgba(255,255,255,0.2)', dash='dash'),
+                                              name='Perfekt', showlegend=True))
+                colors_est = {'brain':'#00d4ff','highlight':'#ff6b6b','micro':'#ffd93d'}
+                for typ in df_est['Typ'].unique():
+                    df_sub = df_est[df_est['Typ']==typ]
+                    fig_est.add_trace(go.Scatter(
+                        x=df_sub['Geschätzt'], y=df_sub['Actual'],
+                        mode='markers', name=typ,
+                        marker=dict(color=colors_est.get(typ,'#a29bfe'), size=7, opacity=0.7),
+                        hovertemplate='Geschätzt: %{x}m → Tatsächlich: %{y:.0f}m<extra></extra>'
+                    ))
+                fig_est.update_layout(**_DARK, height=280, xaxis=dict(title='Geschätzt (Min)', **_GRID),
+                                       yaxis=dict(title='Tatsächlich (Min)', **_GRID),
+                                       margin=dict(t=10,b=40,l=50,r=10),
+                                       legend=dict(orientation='h', y=1.05))
+                st.plotly_chart(fig_est, use_container_width=True)
+            else:
+                st.info("Noch keine Schätzungen mit Zeiterfassung")
+
+        st.markdown("---")
+        st.subheader("🏷️ Tag-Analyse")
+        conn_tag = sqlite3.connect(DB_PATH)
+        tag_rows = conn_tag.execute("""
+            SELECT tags, COUNT(*) as n, ROUND(AVG(elapsed_seconds)/60.0,0) as avg_min,
+                   ROUND(SUM(elapsed_seconds)/3600.0,1) as total_h
+            FROM entries WHERE done=1 AND tags IS NOT NULL AND tags != ''
+            GROUP BY tags ORDER BY n DESC LIMIT 20
+        """).fetchall()
+        conn_tag.close()
+        if tag_rows:
+            df_tag = pd.DataFrame(tag_rows, columns=['Tag','Aufgaben','Ø Min','Gesamt h'])
+            df_tag = df_tag[~df_tag['Tag'].str.contains('projekt', case=False, na=False)]
+            fig_tag = go.Figure(go.Bar(
+                x=df_tag['Tag'], y=df_tag['Aufgaben'],
+                marker=dict(color=df_tag['Aufgaben'],
+                            colorscale=[[0,'rgba(162,155,254,0.2)'],[1,'#a29bfe']],
+                            showscale=False),
+                text=df_tag['Aufgaben'], textposition='outside',
+                hovertemplate='%{x}: %{y} Aufg. | Ø %{customdata[0]} Min | %{customdata[1]}h gesamt<extra></extra>',
+                customdata=df_tag[['Ø Min','Gesamt h']].values
+            ))
+            fig_tag.update_layout(**_DARK, height=260, yaxis=dict(title='Aufgaben', **_GRID),
+                                   margin=dict(t=10,b=40,l=40,r=10))
+            st.plotly_chart(fig_tag, use_container_width=True)
+        else:
+            st.info("Noch keine Tag-Daten")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 3 — SCHLAF & ROUTINEN
+    # ══════════════════════════════════════════════════════════════
+    with tab3:
+        conn_sl = sqlite3.connect(DB_PATH)
+        sleep_rows = conn_sl.execute("""
+            SELECT log_date, quality_pct, bedtime, wake_time
+            FROM sleep_logs WHERE log_date >= date('now','-60 days') ORDER BY log_date
+        """).fetchall()
+        routine_rows = conn_sl.execute("""
+            SELECT log_date, routine, SUM(done) as done_sum, COUNT(*) as total_tasks
+            FROM routine_checks WHERE log_date >= date('now','-60 days')
+            GROUP BY log_date, routine ORDER BY log_date
+        """).fetchall()
+        # Schlaf vs nächster Tag Produktivität
+        prod_rows = conn_sl.execute("""
+            SELECT entry_date, ROUND(AVG(done)*100,0) as rate, COUNT(*) as n
+            FROM entries WHERE entry_date >= date('now','-60 days')
+            GROUP BY entry_date
+        """).fetchall()
+        conn_sl.close()
+
+        if sleep_rows:
+            df_sl = pd.DataFrame(sleep_rows, columns=['Datum','Qualität_pct','Bettzeit','Aufstehen'])
+            df_sl['Qualität'] = (df_sl['Qualität_pct'] / 20).round(1)  # 0-5 Skala
+
+            cl3, cr3 = st.columns(2)
+            with cl3:
+                st.subheader("😴 Schlafqualität (60 Tage)")
+                fig_sl = go.Figure()
+                fig_sl.add_trace(go.Bar(
+                    x=df_sl['Datum'], y=df_sl['Qualität'],
+                    marker=dict(color=df_sl['Qualität_pct'],
+                                colorscale=[[0,'#e74c3c'],[0.5,'#f39c12'],[1,'#2ecc71']],
+                                showscale=False),
+                    hovertemplate='%{x}: %{y:.1f}/5<extra></extra>'
+                ))
+                fig_sl.add_hline(y=df_sl['Qualität'].mean(), line_dash='dash',
+                                  line_color='rgba(255,255,255,0.4)',
+                                  annotation_text=f"Ø {df_sl['Qualität'].mean():.1f}",
+                                  annotation_font_color='rgba(255,255,255,0.6)')
+                fig_sl.update_layout(**_DARK, height=250, yaxis=dict(title='Qualität (0-5)', range=[0,5.5], **_GRID),
+                                      margin=dict(t=10,b=30,l=40,r=10))
+                st.plotly_chart(fig_sl, use_container_width=True)
+
+            with cr3:
+                # Schlaf-Qualität vs Produktivität nächster Tag
+                st.subheader("🔗 Schlaf → Produktivität")
+                if prod_rows:
+                    df_prod = pd.DataFrame(prod_rows, columns=['Datum','Rate','n'])
+                    # Join: sleep day → next day's productivity
+                    df_sl_copy = df_sl.copy()
+                    df_sl_copy['NextDay'] = pd.to_datetime(df_sl_copy['Datum']) + pd.Timedelta(days=1)
+                    df_sl_copy['NextDay'] = df_sl_copy['NextDay'].dt.strftime('%Y-%m-%d')
+                    merged = df_sl_copy.merge(df_prod, left_on='NextDay', right_on='Datum', how='inner')
+                    if len(merged) >= 3:
+                        fig_corr = go.Figure(go.Scatter(
+                            x=merged['Qualität_pct'], y=merged['Rate'],
+                            mode='markers', marker=dict(color='#74b9ff', size=10, opacity=0.8),
+                            hovertemplate='Schlaf: %{x}% → nächster Tag: %{y:.0f}%<extra></extra>'
+                        ))
+                        # Trendlinie
+                        try:
+                            import numpy as np
+                            z = np.polyfit(merged['Qualität_pct'], merged['Rate'], 1)
+                            p = np.poly1d(z)
+                            x_line = [merged['Qualität_pct'].min(), merged['Qualität_pct'].max()]
+                            fig_corr.add_trace(go.Scatter(x=x_line, y=[p(x) for x in x_line],
+                                                           mode='lines', line=dict(color='#ffd700', dash='dash'),
+                                                           name='Trend'))
+                        except Exception:
+                            pass
+                        fig_corr.update_layout(**_DARK, height=250,
+                                               xaxis=dict(title='Schlafqualität (%)', **_GRID),
+                                               yaxis=dict(title='Erledigungsquote nächster Tag (%)', **_GRID),
+                                               margin=dict(t=10,b=40,l=50,r=10), showlegend=False)
+                        st.plotly_chart(fig_corr, use_container_width=True)
+                    else:
+                        st.info("Noch nicht genug Daten für Korrelation (mind. 3 Nächte)")
+                else:
+                    st.info("Keine Produktivitätsdaten")
+        else:
+            st.info("Noch keine Schlafdaten — logge deinen Schlaf auf der Schlaf-Seite.")
+
+        st.markdown("---")
+
+        if routine_rows:
+            st.subheader("🌅 Routinen-Adhärenz")
+            df_rt = pd.DataFrame(routine_rows, columns=['Datum','Routine','Erledigt','Total'])
+            df_rt['Pct'] = (df_rt['Erledigt'] / df_rt['Total'] * 100).round(0)
+            df_morning = df_rt[df_rt['Routine']=='morning']
+            df_evening = df_rt[df_rt['Routine']=='evening']
+
+            fig_rt = go.Figure()
+            if not df_morning.empty:
+                fig_rt.add_trace(go.Scatter(x=df_morning['Datum'], y=df_morning['Pct'],
+                                             mode='lines+markers', name='🌅 Morgen',
+                                             line=dict(color='#f39c12', width=2),
+                                             fill='tozeroy', fillcolor='rgba(243,156,18,0.08)'))
+            if not df_evening.empty:
+                fig_rt.add_trace(go.Scatter(x=df_evening['Datum'], y=df_evening['Pct'],
+                                             mode='lines+markers', name='🌙 Abend',
+                                             line=dict(color='#a29bfe', width=2),
+                                             fill='tozeroy', fillcolor='rgba(162,155,254,0.06)'))
+            fig_rt.add_hline(y=100, line_dash='dot', line_color='rgba(46,204,113,0.4)',
+                              annotation_text='100% ✓', annotation_font_color='#2ecc71')
+            fig_rt.update_layout(**_DARK, height=260, yaxis=dict(title='Adhärenz %', range=[0,110], **_GRID),
+                                  margin=dict(t=10,b=30,l=40,r=10),
+                                  legend=dict(orientation='h', y=1.05), hovermode='x unified')
+            st.plotly_chart(fig_rt, use_container_width=True)
+        else:
+            st.info("Noch keine Routinen-Daten")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 4 — HABITS
+    # ══════════════════════════════════════════════════════════════
+    with tab4:
+        conn_hab = sqlite3.connect(DB_PATH)
+        habits_list = conn_hab.execute("SELECT id, name, icon, color FROM habits").fetchall()
+        if habits_list:
+            st.subheader("✅ Habit-Kalender (letzte 30 Tage)")
+            today_d = date.today()
+            last_30 = [(today_d - timedelta(days=i)).isoformat() for i in range(29, -1, -1)]
+            # Build heatmap
+            z_hab = []
+            y_hab = []
+            for hid, hname, hicon, hcolor in habits_list:
+                logs = conn_hab.execute(
+                    "SELECT log_date FROM habit_logs WHERE habit_id=? AND log_date >= date('now','-30 days')",
+                    (hid,)
+                ).fetchall()
+                log_set = {r[0] for r in logs}
+                row = [1 if d in log_set else 0 for d in last_30]
+                z_hab.append(row)
+                streak = 0
+                for d in reversed(last_30):
+                    if d in log_set:
+                        streak += 1
+                    else:
+                        break
+                total_30 = sum(row)
+                y_hab.append(f"{hicon} {hname} ({total_30}/30, {streak}🔥)")
+
+            fig_hab = go.Figure(go.Heatmap(
+                z=z_hab, x=[d[5:] for d in last_30], y=y_hab,  # mm-dd
+                colorscale=[[0,'rgba(255,255,255,0.04)'],[1,'#2ecc71']],
+                showscale=False,
+                hovertemplate='%{y}<br>%{x}: %{z}<extra></extra>',
+                xgap=2, ygap=3
+            ))
+            fig_hab.update_layout(
+                **_DARK, height=max(180, len(habits_list) * 45 + 60),
+                margin=dict(t=10,b=30,l=180,r=10),
+                xaxis=dict(showgrid=False, tickangle=45,
+                           tickvals=[last_30[i][5:] for i in range(0, 30, 5)],
+                           ticktext=[last_30[i][5:] for i in range(0, 30, 5)]),
+                yaxis=dict(showgrid=False, autorange='reversed')
+            )
+            st.plotly_chart(fig_hab, use_container_width=True)
+
+            st.markdown("---")
+            st.subheader("📊 Habit-Konsistenz (30 Tage)")
+            hab_stats = []
+            for hid, hname, hicon, hcolor in habits_list:
+                count = conn_hab.execute(
+                    "SELECT COUNT(*) FROM habit_logs WHERE habit_id=? AND log_date >= date('now','-30 days')",
+                    (hid,)
+                ).fetchone()[0]
+                hab_stats.append((f"{hicon} {hname}", count, round(count/30*100)))
+            conn_hab.close()
+            df_hcon = pd.DataFrame(hab_stats, columns=['Habit','Tage','Pct']).sort_values('Tage', ascending=True)
+            fig_hcon = go.Figure(go.Bar(
+                x=df_hcon['Tage'], y=df_hcon['Habit'], orientation='h',
+                marker=dict(color=df_hcon['Pct'],
+                            colorscale=[[0,'#e74c3c'],[0.5,'#f39c12'],[1,'#2ecc71']],
+                            showscale=False),
+                text=[f"{p}%" for p in df_hcon['Pct']], textposition='outside',
+                hovertemplate='%{y}: %{x}/30 Tage (%{text})<extra></extra>'
+            ))
+            fig_hcon.update_layout(**_DARK, height=max(180, len(habits_list)*50 + 60),
+                                    xaxis=dict(title='Tage (von 30)', **_GRID),
+                                    margin=dict(t=10,b=30,l=180,r=60))
+            st.plotly_chart(fig_hcon, use_container_width=True)
+        else:
+            conn_hab.close()
+            st.info("Noch keine Habits konfiguriert — lege Habits auf der Habits-Seite an.")
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 5 — TRAINING
+    # ══════════════════════════════════════════════════════════════
+    with tab5:
+        conn_tr = sqlite3.connect(DB_PATH)
+        session_rows = conn_tr.execute("""
+            SELECT session_date, track, COUNT(*) as sets, SUM(clean) as clean_sets,
+                   AVG(best_reps) as avg_reps
+            FROM cal_sessions GROUP BY session_date, track ORDER BY session_date
+        """).fetchall()
+        track_summary = conn_tr.execute("""
+            SELECT track, COUNT(DISTINCT session_date) as days,
+                   SUM(sets_completed) as total_sets, AVG(clean) as clean_rate,
+                   MAX(best_reps) as max_reps
+            FROM cal_sessions GROUP BY track
+        """).fetchall()
+        weekly_vol = conn_tr.execute("""
+            SELECT strftime('%Y-W%W', session_date) as week, COUNT(DISTINCT session_date) as days,
+                   COUNT(*) as total_sets
+            FROM cal_sessions WHERE session_date >= date('now','-90 days')
+            GROUP BY week ORDER BY week
+        """).fetchall()
+        conn_tr.close()
+
+        if not session_rows:
+            st.info("Noch keine Trainingsdaten — starte dein erstes Training!")
+        else:
+            streak_data = get_cal_streak()
+
+            # KPIs
+            tr_k1, tr_k2, tr_k3, tr_k4 = st.columns(4)
+            tr_k1.metric("Trainingstage gesamt", streak_data['total_sessions'])
+            tr_k2.metric("Aktueller Streak", f"{streak_data['current']} 🔥")
+            tr_k3.metric("Rekord-Streak", f"{streak_data['longest']} 🏆")
+            total_clean = sum(r[3] or 0 for r in session_rows)
+            total_sets_all = sum(r[2] or 0 for r in session_rows)
+            overall_clean = round(total_clean / total_sets_all * 100) if total_sets_all else 0
+            tr_k4.metric("Clean Rate gesamt", f"{overall_clean}%")
+
+            st.markdown("---")
+
+            cl5, cr5 = st.columns(2)
+            with cl5:
+                # Sessions pro Track
+                st.subheader("🏋️ Sessions pro Track")
+                if track_summary:
+                    df_trs = pd.DataFrame(track_summary, columns=['Track','Tage','Sets','CleanRate','MaxReps'])
+                    df_trs['Track_label'] = df_trs['Track'].apply(lambda t: CAL_TRACKS.get(t, {}).get('label', t))
+                    df_trs['CleanPct'] = (df_trs['CleanRate'] * 100).round(0)
+                    df_trs['Color'] = df_trs['Track'].apply(lambda t: CAL_TRACKS.get(t, {}).get('color', '#aaa'))
+                    fig_trs = go.Figure(go.Bar(
+                        x=df_trs['Track_label'], y=df_trs['Tage'],
+                        marker_color=df_trs['Color'].tolist(),
+                        text=df_trs['Tage'], textposition='outside',
+                        hovertemplate='%{x}: %{y} Tage | Clean: %{customdata}%<extra></extra>',
+                        customdata=df_trs['CleanPct']
+                    ))
+                    fig_trs.update_layout(**_DARK, height=260, yaxis=dict(title='Trainingstage', **_GRID),
+                                           margin=dict(t=10,b=40,l=40,r=10), showlegend=False)
+                    st.plotly_chart(fig_trs, use_container_width=True)
+
+            with cr5:
+                # Clean Rate pro Track
+                st.subheader("✅ Clean Rate pro Track")
+                if track_summary:
+                    df_cr = pd.DataFrame(track_summary, columns=['Track','Tage','Sets','CleanRate','MaxReps'])
+                    df_cr = df_cr[df_cr['Tage'] > 0]
+                    df_cr['Track_label'] = df_cr['Track'].apply(lambda t: CAL_TRACKS.get(t, {}).get('label', t))
+                    df_cr['CleanPct'] = (df_cr['CleanRate'] * 100).round(0)
+                    df_cr['Color'] = df_cr['Track'].apply(lambda t: CAL_TRACKS.get(t, {}).get('color', '#aaa'))
+                    df_cr = df_cr.sort_values('CleanPct', ascending=True)
+                    fig_cr = go.Figure(go.Bar(
+                        x=df_cr['CleanPct'], y=df_cr['Track_label'], orientation='h',
+                        marker_color=df_cr['Color'].tolist(),
+                        text=[f"{p:.0f}%" for p in df_cr['CleanPct']], textposition='outside',
+                        hovertemplate='%{y}: %{x:.0f}% clean<extra></extra>'
+                    ))
+                    fig_cr.update_layout(**_DARK, height=260, xaxis=dict(title='Clean %', range=[0,115], **_GRID),
+                                          margin=dict(t=10,b=30,l=100,r=60))
+                    st.plotly_chart(fig_cr, use_container_width=True)
+
+            st.markdown("---")
+            st.subheader("📈 Wöchentliches Trainingsvolumen (90 Tage)")
+            if weekly_vol:
+                df_wv = pd.DataFrame(weekly_vol, columns=['Woche','Tage','Sets'])
+                fig_wv = go.Figure()
+                fig_wv.add_trace(go.Bar(x=df_wv['Woche'], y=df_wv['Tage'],
+                                         name='Trainingstage', marker_color='rgba(0,212,255,0.6)'))
+                fig_wv.add_trace(go.Scatter(x=df_wv['Woche'], y=df_wv['Sets'],
+                                             name='Sätze', yaxis='y2',
+                                             line=dict(color='#ffd700', width=2),
+                                             mode='lines+markers'))
+                fig_wv.update_layout(**_DARK, height=260, yaxis=dict(title='Tage', **_GRID),
+                                      yaxis2=dict(title='Sätze', overlaying='y', side='right', **_GRID),
+                                      margin=dict(t=10,b=30,l=40,r=50),
+                                      legend=dict(orientation='h', y=1.05), hovermode='x unified')
+                st.plotly_chart(fig_wv, use_container_width=True)
+
+            # Level-Fortschritt pro Track
+            st.markdown("---")
+            st.subheader("🎯 Aktueller Level-Stand")
+            prog_all = get_cal_progress()
+            track_cols = st.columns(3)
+            for i, (track, info) in enumerate(CAL_TRACKS.items()):
+                p = prog_all[track]
+                ex = get_cal_exercise(track, p['level'], p['bonus'])
+                pct = (p['level'] / max(len(info['levels']) - 1, 1)) * 100
+                with track_cols[i % 3]:
+                    st.markdown(
+                        f'<div style="background:rgba(255,255,255,0.03);border:1px solid {info["color"]}33;'
+                        f'border-radius:12px;padding:12px 14px;margin-bottom:10px">'
+                        f'<div style="font-size:13px;font-weight:700;color:white;margin-bottom:6px">'
+                        f'{info["icon"]} {info["label"]}</div>'
+                        f'<div style="font-size:11px;color:{info["color"]};margin-bottom:4px">'
+                        f'Level {p["level"]+1}/{len(info["levels"])} · {ex["name"]}</div>'
+                        f'<div style="height:4px;background:rgba(255,255,255,0.07);border-radius:2px">'
+                        f'<div style="width:{min(pct,100):.0f}%;height:100%;background:{info["color"]};border-radius:2px"></div>'
+                        f'</div></div>',
+                        unsafe_allow_html=True
+                    )
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 6 — PROJEKTE
+    # ══════════════════════════════════════════════════════════════
+    with tab6:
+        conn_pr = sqlite3.connect(DB_PATH)
+        projects_all = conn_pr.execute("""
+            SELECT id, name, deadline, color, daily_minutes, COALESCE(roter_faden,'')
+            FROM projects WHERE active=1
+        """).fetchall()
+
+        if not projects_all:
+            conn_pr.close()
+            st.info("Noch keine aktiven Projekte — erstelle Projekte auf der Projekte-Seite.")
+        else:
+            # Gesamt-Übersicht
+            all_tasks = conn_pr.execute("SELECT project_id, done, estimate_minutes FROM project_tasks").fetchall()
+            conn_pr.close()
+
+            total_proj_tasks = len(all_tasks)
+            done_proj_tasks  = sum(1 for t in all_tasks if t[1])
+            proj_rate = done_proj_tasks / total_proj_tasks * 100 if total_proj_tasks else 0
+
+            pk1, pk2, pk3 = st.columns(3)
+            pk1.metric("Aktive Projekte", len(projects_all))
+            pk2.metric("Tasks erledigt", f"{done_proj_tasks}/{total_proj_tasks}")
+            pk3.metric("Erledigungsrate", f"{proj_rate:.0f}%")
+
+            st.markdown("---")
+            st.subheader("📊 Projektfortschritt")
+
+            task_by_proj = {}
+            for task in all_tasks:
+                pid = task[0]
+                task_by_proj.setdefault(pid, []).append(task)
+
+            for proj_id, name, deadline, color, daily_mins, roter_faden in projects_all:
+                tasks = task_by_proj.get(proj_id, [])
+                t_total = len(tasks)
+                t_done  = sum(1 for t in tasks if t[1])
+                t_pct   = t_done / t_total * 100 if t_total else 0
+                t_rem_min = sum(t[2] or 0 for t in tasks if not t[1])
+
+                try:
+                    dl_d = date.fromisoformat(deadline)
+                    days_left = (dl_d - date.today()).days
+                    dl_str = f"📅 noch {days_left}d"
+                    dl_color = '#e74c3c' if days_left <= 7 else ('#f39c12' if days_left <= 21 else '#2ecc71')
+                except Exception:
+                    dl_str = ''
+                    dl_color = 'rgba(255,255,255,0.4)'
+
+                bar_w = int(t_pct)
+                st.markdown(
+                    f'<div style="border-left:3px solid {color};border-radius:0 10px 10px 0;'
+                    f'background:rgba(255,255,255,0.02);padding:12px 16px;margin-bottom:4px">'
+                    f'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
+                    f'<strong style="font-size:14px;color:white">{name}</strong>'
+                    f'<span style="font-size:11px;font-weight:700;color:{dl_color}">{dl_str}</span>'
+                    f'<span style="font-size:11px;color:rgba(255,255,255,0.4);margin-left:auto">'
+                    f'{t_done}/{t_total} · {t_pct:.0f}% · {t_rem_min} min offen</span>'
+                    f'</div>'
+                    + (f'<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:3px;font-style:italic">🧵 {roter_faden[:80]}</div>' if roter_faden else '')
+                    + f'<div style="height:6px;background:rgba(255,255,255,0.06);border-radius:3px;margin-top:8px">'
+                    f'<div style="width:{bar_w}%;height:100%;background:{color};border-radius:3px"></div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("---")
+            # Projekt-Tasks nach Status (Donut)
+            col_pA, col_pB = st.columns(2)
+            with col_pA:
+                st.subheader("Tasks-Übersicht")
+                done_min = sum(t[2] or 0 for t in all_tasks if t[1])
+                open_min = sum(t[2] or 0 for t in all_tasks if not t[1])
+                fig_pd = go.Figure(go.Pie(
+                    labels=['Erledigt', 'Offen'],
+                    values=[done_proj_tasks, total_proj_tasks - done_proj_tasks],
+                    hole=0.5,
+                    marker_colors=['#2ecc71', 'rgba(255,255,255,0.1)'],
+                    textfont_size=13
+                ))
+                fig_pd.update_layout(**_DARK, height=220, margin=dict(t=10,b=10,l=10,r=10))
+                st.plotly_chart(fig_pd, use_container_width=True)
+                st.caption(f"Offene Arbeit: {open_min} min · Erledigt: {done_min} min")
+
+            with col_pB:
+                st.subheader("Zeit offen pro Projekt")
+                proj_open_mins = []
+                for proj_id, name, deadline, color, daily_mins, _ in projects_all:
+                    tasks = task_by_proj.get(proj_id, [])
+                    rem = sum(t[2] or 0 for t in tasks if not t[1])
+                    if rem > 0:
+                        proj_open_mins.append((name[:20], rem, color))
+                if proj_open_mins:
+                    df_pom = pd.DataFrame(proj_open_mins, columns=['Projekt','Min','Color']).sort_values('Min')
+                    fig_pom = go.Figure(go.Bar(
+                        x=df_pom['Min'], y=df_pom['Projekt'], orientation='h',
+                        marker_color=df_pom['Color'].tolist(),
+                        text=[f"{m} min" for m in df_pom['Min']], textposition='outside'
+                    ))
+                    fig_pom.update_layout(**_DARK, height=220,
+                                          xaxis=dict(title='Minuten offen', **_GRID),
+                                          margin=dict(t=10,b=30,l=120,r=70))
+                    st.plotly_chart(fig_pom, use_container_width=True)
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 7 — INTRADAY (Tiefen-Zeitanalyse)
+    # ══════════════════════════════════════════════════════════════
+    with tab7:
+        conn_id = sqlite3.connect(DB_PATH)
+
+        # Dot-Timeline: wann wurden Tasks erledigt (letzte 14 Tage)
+        timeline_rows = conn_id.execute("""
+            SELECT entry_date,
+                   CAST(strftime('%H', started_at) AS INTEGER) as h,
+                   CAST(strftime('%M', started_at) AS INTEGER) as m,
+                   elapsed_seconds, entry_type, content
+            FROM entries
+            WHERE done=1 AND started_at IS NOT NULL
+            AND entry_date >= date('now','-14 days')
+            ORDER BY entry_date, started_at
+        """).fetchall()
+
+        # Tagesstart/ende pro Tag
+        day_bounds = conn_id.execute("""
+            SELECT entry_date,
+                   strftime('%H:%M', MIN(started_at)) as first_start,
+                   strftime('%H:%M', MAX(completed_at)) as last_done,
+                   COUNT(*) as tasks,
+                   SUM(elapsed_seconds) as total_secs
+            FROM entries WHERE done=1 AND started_at IS NOT NULL AND completed_at IS NOT NULL
+            AND entry_date >= date('now','-30 days')
+            GROUP BY entry_date ORDER BY entry_date
+        """).fetchall()
+
+        # Ø Task-Dauer nach Stunde
+        dur_by_hour = conn_id.execute("""
+            SELECT CAST(strftime('%H', started_at) AS INTEGER) as h,
+                   AVG(elapsed_seconds) as avg_secs, COUNT(*) as n
+            FROM entries WHERE done=1 AND started_at IS NOT NULL AND elapsed_seconds > 0
+            GROUP BY h ORDER BY h
+        """).fetchall()
+
+        # Focus-Block Daten
+        focus_rows = conn_id.execute("""
+            SELECT started_at, completed_at, elapsed_seconds, entry_type
+            FROM entries WHERE done=1 AND started_at IS NOT NULL AND completed_at IS NOT NULL
+            AND started_at >= datetime('now','-30 days')
+            ORDER BY started_at
+        """).fetchall()
+
+        # Session-Längen
+        dur_rows = conn_id.execute("""
+            SELECT elapsed_seconds, entry_type
+            FROM entries WHERE done=1 AND elapsed_seconds > 30
+            ORDER BY completed_at DESC LIMIT 500
+        """).fetchall()
+
+        # Produktivitätsverlauf nach 2h-Blöcken (Intraday-Kurve)
+        intraday_curve = conn_id.execute("""
+            SELECT CAST(strftime('%H', completed_at) AS INTEGER) / 2 * 2 as block_start,
+                   COUNT(*) as n, SUM(elapsed_seconds) as secs
+            FROM entries WHERE done=1 AND completed_at IS NOT NULL
+            GROUP BY block_start ORDER BY block_start
+        """).fetchall()
+
+        # Context-Switch-Analyse
+        switches = conn_id.execute("""
+            SELECT entry_date,
+                   entry_type,
+                   LAG(entry_type) OVER (PARTITION BY entry_date ORDER BY started_at) as prev_type
+            FROM entries
+            WHERE done=1 AND started_at IS NOT NULL
+            AND entry_date >= date('now','-30 days')
+        """).fetchall()
+
+        conn_id.close()
+
+        # ── Dot-Timeline ──────────────────────────────────────────
+        st.subheader("📍 Aufgaben-Dot-Timeline (letzte 14 Tage)")
+        if timeline_rows:
+            type_colors = {'brain':'#00d4ff','highlight':'#ffd700','micro':'#ff6b6b','projekt':'#a29bfe'}
+            dates_seen = []
+            fig_tl = go.Figure()
+            by_type = {}
+            for row in timeline_rows:
+                d, h, m, secs, etype, content = row
+                if h is None or m is None:
+                    continue
+                x_val = h + (m or 0) / 60
+                size = max(7, min(28, (secs or 300) / 60))
+                color = type_colors.get(etype, '#dfe6e9')
+                short = (content or '')[:45] + '…' if len(content or '') > 45 else (content or '')
+                by_type.setdefault(etype, {'x':[],'y':[],'size':[],'text':[],'color':color})
+                by_type[etype]['x'].append(x_val)
+                by_type[etype]['y'].append(d)
+                by_type[etype]['size'].append(size)
+                by_type[etype]['text'].append(f"{d} {h:02d}:{(m or 0):02d} — {short}<br>{round((secs or 0)/60)} Min")
+
+            for etype, data in by_type.items():
+                fig_tl.add_trace(go.Scatter(
+                    x=data['x'], y=data['y'], mode='markers',
+                    marker=dict(size=data['size'], color=data['color'], opacity=0.8,
+                                line=dict(color='rgba(255,255,255,0.15)', width=1)),
+                    name=etype, text=data['text'], hoverinfo='text'
+                ))
+
+            fig_tl.update_layout(
+                **_DARK, height=380,
+                xaxis=dict(title='Uhrzeit', range=[-0.5, 23.5],
+                           tickvals=list(range(0, 24, 2)),
+                           ticktext=[f"{h}:00" for h in range(0, 24, 2)], **_GRID),
+                yaxis=dict(autorange='reversed', **_GRID),
+                margin=dict(t=10,b=40,l=80,r=10),
+                legend=dict(orientation='h', y=1.05), hovermode='closest'
+            )
+            st.caption("Punktgröße = Dauer · Farbe = Typ (Brain=blau, Highlight=gelb, Micro=rot)")
+            st.plotly_chart(fig_tl, use_container_width=True)
+        else:
+            st.info("Noch keine Zeitdaten — aktiviere den Timer beim Bearbeiten von Aufgaben.")
+
+        st.markdown("---")
+
+        # ── Intraday-Produktivitätskurve ──────────────────────────
+        st.subheader("⚡ Intraday-Energie-Kurve (2h-Blöcke)")
+        if intraday_curve:
+            df_ic = pd.DataFrame(intraday_curve, columns=['start_h','n','secs'])
+            df_ic['label'] = df_ic['start_h'].apply(lambda h: f"{h:02d}–{h+2:02d}h")
+            df_ic['min'] = (df_ic['secs'] / 60).round(0)
+            peak_block = df_ic.loc[df_ic['n'].idxmax()]
+            fig_ic = go.Figure()
+            fig_ic.add_trace(go.Bar(
+                x=df_ic['label'], y=df_ic['n'],
+                marker=dict(
+                    color=df_ic['n'],
+                    colorscale=[[0,'rgba(0,212,255,0.1)'],[0.5,'rgba(0,212,255,0.5)'],[1,'#00ff88']],
+                    showscale=False
+                ),
+                text=df_ic['n'], textposition='outside', name='Aufgaben',
+                hovertemplate='%{x}: %{y} Aufgaben, %{customdata} Min<extra></extra>',
+                customdata=df_ic['min']
+            ))
+            fig_ic.add_trace(go.Scatter(
+                x=df_ic['label'], y=df_ic['min'], mode='lines+markers',
+                name='Fokuszeit (Min)', yaxis='y2',
+                line=dict(color='#ffd700', width=2),
+                marker=dict(size=6)
+            ))
+            fig_ic.update_layout(
+                **_DARK, height=260, hovermode='x unified',
+                xaxis=dict(**_GRID),
+                yaxis=dict(title='Aufgaben', **_GRID),
+                yaxis2=dict(title='Minuten', overlaying='y', side='right', **_GRID),
+                margin=dict(t=10,b=40,l=40,r=50),
+                legend=dict(orientation='h', y=1.05)
+            )
+            st.caption(f"Produktivster Block: **{peak_block['label']}** mit {int(peak_block['n'])} Aufgaben")
+            st.plotly_chart(fig_ic, use_container_width=True)
+
+        st.markdown("---")
+
+        cl7a, cr7a = st.columns(2)
+
+        with cl7a:
+            # ── Tagesstart-Uhrzeit-Trend ──────────────────────────
+            st.subheader("🌅 Tagesstart-Trend (30 Tage)")
+            if day_bounds:
+                def hhmm_dec(s):
+                    if not s:
+                        return None
+                    try:
+                        parts = s.split(':')
+                        return int(parts[0]) + int(parts[1]) / 60
+                    except Exception:
+                        return None
+
+                df_db = pd.DataFrame(day_bounds, columns=['Datum','Erster','Letzter','Tasks','Secs'])
+                df_db['start_h'] = df_db['Erster'].apply(hhmm_dec)
+                df_db['end_h']   = df_db['Letzter'].apply(hhmm_dec)
+                df_db['dur_h']   = (df_db['Secs'] / 3600).round(1)
+                df_db = df_db.dropna(subset=['start_h'])
+
+                if not df_db.empty:
+                    avg_s = df_db['start_h'].mean()
+                    avg_e = df_db['end_h'].dropna().mean()
+
+                    fig_db = go.Figure()
+                    fig_db.add_trace(go.Scatter(
+                        x=df_db['Datum'], y=df_db['start_h'], mode='markers+lines',
+                        name='🌅 Tagesstart', marker=dict(color='#ffd700', size=8),
+                        line=dict(color='rgba(255,215,0,0.4)', width=1),
+                        text=df_db['Erster'], hovertemplate='%{x}: %{text}<extra></extra>'
+                    ))
+                    fig_db.add_trace(go.Scatter(
+                        x=df_db['Datum'], y=df_db['end_h'].fillna(method='ffill'),
+                        mode='markers+lines', name='🌙 Tagesende',
+                        marker=dict(color='#a29bfe', size=6),
+                        line=dict(color='rgba(162,155,254,0.3)', width=1),
+                        text=df_db['Letzter'].fillna(''), hovertemplate='%{x}: %{text}<extra></extra>'
+                    ))
+                    fig_db.add_hline(y=avg_s, line_dash='dash', line_color='rgba(255,215,0,0.4)',
+                                      annotation_text=f"Ø Start {int(avg_s)}:{int((avg_s%1)*60):02d}",
+                                      annotation_font_color='rgba(255,215,0,0.7)')
+                    if avg_e:
+                        fig_db.add_hline(y=avg_e, line_dash='dash', line_color='rgba(162,155,254,0.4)',
+                                          annotation_text=f"Ø Ende {int(avg_e)}:{int((avg_e%1)*60):02d}",
+                                          annotation_font_color='rgba(162,155,254,0.7)',
+                                          annotation_position='top left')
+                    fig_db.update_layout(
+                        **_DARK, height=260,
+                        yaxis=dict(title='Uhrzeit', tickvals=list(range(5,24)),
+                                   ticktext=[f"{h}:00" for h in range(5,24)],
+                                   range=[4,23], **_GRID),
+                        margin=dict(t=10,b=30,l=55,r=10),
+                        legend=dict(orientation='h', y=1.05)
+                    )
+                    st.plotly_chart(fig_db, use_container_width=True)
+            else:
+                st.info("Noch keine Tagesdaten")
+
+        with cr7a:
+            # ── Ø Task-Dauer nach Stunde ──────────────────────────
+            st.subheader("⏱️ Ø Task-Dauer nach Stunde")
+            if dur_by_hour:
+                df_dh = pd.DataFrame(dur_by_hour, columns=['Stunde','avg_secs','n'])
+                df_dh['avg_min'] = (df_dh['avg_secs'] / 60).round(0)
+                peak_dur_h = int(df_dh.loc[df_dh['avg_min'].idxmax(), 'Stunde'])
+                fig_dh = go.Figure(go.Bar(
+                    x=[f"{int(h)}h" for h in df_dh['Stunde']], y=df_dh['avg_min'],
+                    marker_color=['#ff9500' if int(h)==peak_dur_h else 'rgba(255,149,0,0.35)'
+                                   for h in df_dh['Stunde']],
+                    text=df_dh['avg_min'].astype(int), textposition='outside',
+                    hovertemplate='%{x}: Ø %{y:.0f} Min (%{customdata} Tasks)<extra></extra>',
+                    customdata=df_dh['n']
+                ))
+                fig_dh.update_layout(**_DARK, height=260, yaxis=dict(title='Ø Min', **_GRID),
+                                      margin=dict(t=10,b=30,l=40,r=10))
+                st.caption(f"Längste Tasks durchschnittlich: **{peak_dur_h}:00–{peak_dur_h+1}:00 Uhr**")
+                st.plotly_chart(fig_dh, use_container_width=True)
+
+        st.markdown("---")
+
+        # ── Focus-Block Analyse (aus Fokus-Modus-Tracking) ───────────
+        st.subheader("🎯 Pomodoro Focus-Blöcke")
+        fb_all = get_focus_blocks(days=60)
+        if fb_all:
+            df_fb = pd.DataFrame(fb_all)
+            df_fb['min'] = (df_fb['secs'] / 60).round(1)
+            df_fb['steps_pct'] = df_fb.apply(
+                lambda r: round(r['steps_done'] / r['steps_total'] * 100) if r['steps_total'] > 0 else 0, axis=1
+            )
+
+            total_blks     = len(df_fb)
+            avg_dur        = df_fb['min'].mean()
+            deep_blks      = (df_fb['min'] >= 20).sum()
+            total_pomo_h   = round(df_fb['min'].sum() / 60, 1)
+            avg_steps_rate = df_fb[df_fb['steps_total'] > 0]['steps_pct'].mean() if (df_fb['steps_total'] > 0).any() else 0
+
+            b1, b2, b3, b4, b5 = st.columns(5)
+            b1.metric("Blocks gesamt",    total_blks)
+            b2.metric("Ø Block-Dauer",    f"{avg_dur:.0f} Min")
+            b3.metric("Full Pomo (≥20 Min)", int(deep_blks))
+            b4.metric("Gesamt Fokuszeit", f"{total_pomo_h}h")
+            b5.metric("Ø Schritte-Rate",  f"{avg_steps_rate:.0f}%" if avg_steps_rate else "–")
+
+            col_bh1, col_bh2 = st.columns([3, 2])
+            with col_bh1:
+                # Blocks per day with steps heatmap
+                daily_fb = df_fb.groupby('date').agg(
+                    blocks=('min','count'), fokus_min=('min','sum'),
+                    avg_steps=('steps_pct','mean')
+                ).reset_index()
+
+                fig_fb_d = go.Figure()
+                fig_fb_d.add_trace(go.Bar(
+                    x=daily_fb['date'], y=daily_fb['blocks'],
+                    name='Blöcke', marker_color='rgba(162,155,254,0.7)',
+                    hovertemplate='%{x}: %{y} Blöcke | %{customdata:.0f} Min<extra></extra>',
+                    customdata=daily_fb['fokus_min']
+                ))
+                fig_fb_d.add_trace(go.Scatter(
+                    x=daily_fb['date'], y=daily_fb['avg_steps'],
+                    name='Ø Schritte %', yaxis='y2',
+                    line=dict(color='#ffd700', width=2), mode='lines+markers',
+                    hovertemplate='%{x}: %{y:.0f}% Schritte<extra></extra>'
+                ))
+                fig_fb_d.update_layout(
+                    **_DARK, height=240, hovermode='x unified',
+                    yaxis=dict(title='Blöcke', **_GRID),
+                    yaxis2=dict(title='Schritte %', overlaying='y', side='right', range=[0,110], **_GRID),
+                    margin=dict(t=10,b=30,l=40,r=50),
+                    legend=dict(orientation='h', y=1.05)
+                )
+                st.plotly_chart(fig_fb_d, use_container_width=True)
+
+            with col_bh2:
+                st.caption("Letzte Fokus-Sessions")
+                rs_fb = ("background:rgba(255,255,255,0.03);border-radius:8px;padding:7px 11px;"
+                         "margin-bottom:5px;font-size:11px")
+                for blk in fb_all[:7]:
+                    dur_m = round(blk['secs'] / 60)
+                    steps_str = (f"✅ {blk['steps_done']}/{blk['steps_total']}"
+                                 if blk['steps_total'] > 0 else "")
+                    task_short = blk['task'][:28] + '…' if len(blk['task']) > 28 else blk['task']
+                    st.markdown(
+                        f'<div style="{rs_fb}">'
+                        f'<div style="font-weight:600;color:white">{task_short}</div>'
+                        f'<div style="color:rgba(255,255,255,0.4)">{blk["date"]} · R{blk["round"]} · '
+                        f'{dur_m} Min {steps_str}</div>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+        else:
+            st.info("Noch keine Fokus-Blöcke — starte eine Aufgabe im Fokus-Modus um das Tracking zu aktivieren.")
+
+        st.markdown("---")
+
+        # ── Session-Längen + Context-Switch ──────────────────────
+        col_sl, col_cs = st.columns(2)
+
+        with col_sl:
+            st.subheader("📊 Session-Längen Verteilung")
+            if dur_rows:
+                df_dur = pd.DataFrame(dur_rows, columns=['Secs','Typ'])
+                df_dur['Min'] = df_dur['Secs'] / 60
+                type_colors_d = {'brain':'#00d4ff','highlight':'#ffd700','micro':'#ff6b6b','projekt':'#a29bfe'}
+                fig_dur = go.Figure()
+                for typ in df_dur['Typ'].unique():
+                    sub = df_dur[df_dur['Typ']==typ]
+                    fig_dur.add_trace(go.Histogram(
+                        x=sub['Min'], name=typ, nbinsx=30, opacity=0.72,
+                        marker_color=type_colors_d.get(typ,'#dfe6e9'),
+                        hovertemplate='%{x:.0f} Min: %{y}<extra></extra>'
+                    ))
+                avg_dur_all = df_dur['Min'].mean()
+                fig_dur.add_vline(x=avg_dur_all, line_dash='dash', line_color='#2ecc71',
+                                   annotation_text=f"Ø {avg_dur_all:.0f} Min",
+                                   annotation_font_color='#2ecc71')
+                fig_dur.update_layout(
+                    **_DARK, barmode='overlay', height=240,
+                    xaxis=dict(title='Dauer (Min)', range=[0,120], **_GRID),
+                    yaxis=dict(title='Sessions', **_GRID),
+                    margin=dict(t=10,b=40,l=40,r=10),
+                    legend=dict(orientation='h', y=1.05)
+                )
+                st.plotly_chart(fig_dur, use_container_width=True)
+
+        with col_cs:
+            st.subheader("🔀 Context-Switch Analyse")
+            if switches:
+                switch_count = sum(1 for r in switches if r[1] and r[2] and r[1] != r[2])
+                no_switch    = sum(1 for r in switches if r[1] and r[2] and r[1] == r[2])
+                no_prev      = sum(1 for r in switches if not r[2])
+
+                pairs = {}
+                for r in switches:
+                    if r[1] and r[2] and r[1] != r[2]:
+                        key = f"{r[2]} → {r[1]}"
+                        pairs[key] = pairs.get(key, 0) + 1
+
+                pct_switch = switch_count / (switch_count + no_switch) * 100 if (switch_count + no_switch) else 0
+                st.metric("Context-Switches",   switch_count)
+                st.metric("Gleicher Typ (Flow)", no_switch)
+                st.metric("Switch-Rate",         f"{pct_switch:.0f}%")
+
+                if pairs:
+                    top_pairs = sorted(pairs.items(), key=lambda x: x[1], reverse=True)[:5]
+                    st.caption("Häufigste Wechsel:")
+                    rs_sw = ("background:rgba(255,255,255,0.03);border-radius:7px;padding:6px 10px;"
+                             "margin-bottom:5px;font-size:11px;display:flex;justify-content:space-between")
+                    for label, cnt in top_pairs:
+                        st.markdown(
+                            f'<div style="{rs_sw}">'
+                            f'<span style="color:rgba(255,255,255,0.7)">{label}</span>'
+                            f'<span style="color:#74b9ff;font-weight:700">×{cnt}</span>'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+    # ══════════════════════════════════════════════════════════════
+    # TAB 8 — KI ANALYSE
+    # ══════════════════════════════════════════════════════════════
+    with tab8:
+        st.subheader("🤖 KI-Statistik-Analyse")
+        st.caption("Die KI analysiert alle deine Daten, erkennt Muster und zeigt konkret was nicht funktioniert — mit spezifischen Lösungen.")
+
+        cache_key = f"ki_stats_{date.today().isoformat()}"
+        cached_raw = get_setting(cache_key)
+        cached_analysis = None
+        if cached_raw:
+            try:
+                cached_analysis = json.loads(cached_raw)
+            except Exception:
+                pass
+
+        col_ki_info, col_ki_btn = st.columns([3, 1])
+        with col_ki_info:
+            if cached_analysis and 'error' not in cached_analysis:
+                st.success(f"Analyse von heute geladen. Klicke 'Neu analysieren' für eine frische Auswertung.")
+        with col_ki_btn:
+            run_ki = st.button("🔍 Neu analysieren", key="ki_stats_run", use_container_width=True)
+
+        if run_ki:
+            api_key_ki = get_setting("nvidia_api_key") or ""
+            if not api_key_ki:
+                st.error("Kein API-Key hinterlegt — in den Einstellungen eintragen.")
+            else:
+                with st.spinner("KI analysiert alle deine Daten... (ca. 10-20s)"):
+                    result_ki = ki_analyze_statistics(api_key_ki)
+                    if 'error' not in result_ki:
+                        set_setting(cache_key, json.dumps(result_ki, ensure_ascii=False))
+                        cached_analysis = result_ki
+                        st.rerun()
+                    else:
+                        st.error(f"Fehler: {result_ki['error']}")
+
+        if cached_analysis and 'error' not in cached_analysis:
+            an = cached_analysis
+
+            # Top Pattern Banner
+            if an.get('top_pattern'):
+                st.markdown(
+                    f'<div style="background:linear-gradient(135deg,rgba(0,212,255,0.1),rgba(162,155,254,0.07));\n'
+                    f'border-radius:14px;padding:16px 22px;border:1px solid rgba(0,212,255,0.25);margin:12px 0 20px 0">\n'
+                    f'<div style="font-size:10px;color:rgba(0,212,255,0.7);font-weight:700;letter-spacing:1.5px;margin-bottom:6px">WICHTIGSTES MUSTER</div>\n'
+                    f'<div style="font-size:15px;font-weight:700;color:white;line-height:1.5">{an["top_pattern"]}</div>\n'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+            col_pat, col_prob = st.columns(2)
+
+            with col_pat:
+                st.markdown("**📊 Erkannte Muster**")
+                type_border = {'positive':'#2ecc71','negative':'#e74c3c','neutral':'#f39c12'}
+                for pat in an.get('patterns', []):
+                    bc = type_border.get(pat.get('type','neutral'),'#74b9ff')
+                    st.markdown(
+                        f'<div style="border-left:3px solid {bc};background:rgba(255,255,255,0.025);\n'
+                        f'border-radius:0 10px 10px 0;padding:10px 14px;margin-bottom:9px">\n'
+                        f'<div style="font-weight:700;color:white;font-size:13px">{pat.get("icon","📈")} {pat.get("title","")}</div>\n'
+                        f'<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:3px;line-height:1.5">{pat.get("evidence","")}</div>\n'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
+            with col_prob:
+                st.markdown("**⚠️ Was nicht funktioniert**")
+                sev_c = {'hoch':'#e74c3c','mittel':'#f39c12','niedrig':'#74b9ff'}
+                for prob in an.get('problems', []):
+                    sc = sev_c.get(prob.get('severity','mittel'),'#f39c12')
+                    st.markdown(
+                        f'<div style="background:rgba(255,255,255,0.025);border:1px solid {sc}44;\n'
+                        f'border-radius:10px;padding:10px 14px;margin-bottom:9px">\n'
+                        f'<div style="display:flex;align-items:center;gap:8px">\n'
+                        f'<span>{prob.get("icon","⚠️")}</span>\n'
+                        f'<span style="font-weight:700;color:white;font-size:13px">{prob.get("title","")}</span>\n'
+                        f'<span style="margin-left:auto;font-size:10px;font-weight:700;color:{sc};\n'
+                        f'background:{sc}22;padding:2px 8px;border-radius:4px">{prob.get("severity","?").upper()}</span>\n'
+                        f'</div>\n'
+                        f'<div style="color:rgba(255,255,255,0.5);font-size:11px;margin-top:4px;line-height:1.5">{prob.get("evidence","")}</div>\n'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
+
+            st.markdown("---")
+
+            # Lösungen
+            st.markdown("**🎯 Konkrete Lösungen**")
+            solutions = an.get('solutions', [])
+            if solutions:
+                sol_cols = st.columns(min(len(solutions), 3))
+                for i, sol in enumerate(solutions):
+                    with sol_cols[i % 3]:
+                        st.markdown(
+                            f'<div style="background:rgba(46,204,113,0.05);border:1px solid rgba(46,204,113,0.2);\n'
+                            f'border-radius:12px;padding:14px 16px;margin-bottom:8px;min-height:140px">\n'
+                            f'<div style="font-size:22px;margin-bottom:6px">{sol.get("icon","💡")}</div>\n'
+                            f'<div style="font-weight:700;color:white;font-size:13px;margin-bottom:4px">{sol.get("action","")}</div>\n'
+                            f'<div style="color:rgba(255,255,255,0.35);font-size:10px;font-style:italic;margin-bottom:6px">↳ {sol.get("problem","")}</div>\n'
+                            f'<div style="color:rgba(255,255,255,0.6);font-size:11px;line-height:1.5">{sol.get("why","")}</div>\n'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+            # Korrelationen
+            correlations = an.get('correlations', [])
+            if correlations:
+                st.markdown("---")
+                st.markdown("**🔗 Erkannte Zusammenhänge**")
+                corr_cols = st.columns(min(len(correlations), 3))
+                for i, corr in enumerate(correlations):
+                    with corr_cols[i % 3]:
+                        st.markdown(
+                            f'<div style="background:rgba(116,185,255,0.06);border:1px solid rgba(116,185,255,0.18);\n'
+                            f'border-radius:12px;padding:12px 14px;margin-bottom:8px">\n'
+                            f'<div style="font-size:18px;margin-bottom:5px">{corr.get("icon","🔗")}</div>\n'
+                            f'<div style="font-size:12px;color:#74b9ff;margin-bottom:3px">'
+                            f'<strong>{corr.get("factor_a","")}</strong> × <strong>{corr.get("factor_b","")}</strong></div>\n'
+                            f'<div style="color:rgba(255,255,255,0.65);font-size:11px;line-height:1.5">{corr.get("insight","")}</div>\n'
+                            f'</div>',
+                            unsafe_allow_html=True
+                        )
+
+            # Energie-Insight
+            if an.get('energy_insight'):
+                st.markdown("---")
+                st.markdown(
+                    f'<div style="background:rgba(255,149,0,0.07);border:1px solid rgba(255,149,0,0.22);\n'
+                    f'border-radius:12px;padding:14px 20px">\n'
+                    f'<div style="font-size:10px;color:rgba(255,149,0,0.8);font-weight:700;letter-spacing:1.5px;margin-bottom:7px">⚡ DEINE OPTIMALE TAGESSTRUKTUR</div>\n'
+                    f'<div style="color:white;font-size:13px;line-height:1.7">{an["energy_insight"]}</div>\n'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
+        elif not cached_analysis:
+            st.markdown(
+                '<div style="text-align:center;padding:70px 20px;color:rgba(255,255,255,0.25)">'
+                '<div style="font-size:56px;margin-bottom:14px">🤖</div>'
+                '<div style="font-size:17px;font-weight:600">KI-Analyse noch nicht gestartet</div>'
+                '<div style="font-size:12px;margin-top:8px">Klicke "Neu analysieren" — die KI wertet alle gesammelten Daten aus:<br>'
+                'Produktivitätsmuster, Schlaf-Korrelationen, Habit-Konsistenz, Trainings-Trends</div>'
+                '</div>',
+                unsafe_allow_html=True
+            )
 
 
 # ========== CALISTHENICS TRAININGSSEITE ==========
@@ -7644,8 +10738,11 @@ def render_training_page():
 
     sync_daily_training()
     streak = get_cal_streak()
-    today_tracks = todays_cal_tracks()
     prog = get_cal_progress()
+    today_tracks = todays_cal_tracks()
+    today_plan   = get_stored_training_plan() or {}
+    rest_day     = today_plan.get('rest_day', False)
+    api_key      = get_setting('nvidia_api_key', '')
 
     # ── Hero: Streak ──────────────────────────────────────────
     flame = "🔥" if streak['current'] > 0 else "💤"
@@ -7687,75 +10784,427 @@ def render_training_page():
 
     st.markdown("---")
 
-    # ── Heutiges Training ───────────────────────────────────────
-    st.markdown("### 💪 Heutiges Training")
-    entry_id, entry_done = get_todays_training_entry_id()
+    # ── Heutiger Plan ──────────────────────────────────────────────
+    plan_src = today_plan.get('source', 'auto')
+    src_badge = '🤖 KI-Plan' if plan_src == 'ki' else ('✋ Manuell' if plan_src == 'manual' else '⚙️ Auto-Plan')
+    src_color = '#00d4ff' if plan_src == 'ki' else ('#ffd700' if plan_src == 'manual' else '#a29bfe')
+    rationale = today_plan.get('rationale', '')
+    tip = today_plan.get('tip', '')
 
-    if streak['trained_today']:
-        st.success("Heute bereits geloggt — stark! Du kannst unten trotzdem nachtragen/korrigieren.")
-
-    with st.form("cal_log_form"):
-        inputs = {}
-        for track in today_tracks:
-            info = CAL_TRACKS[track]
-            p = prog[track]
-            ex = get_cal_exercise(track, p['level'], p['bonus'])
-            unit = "Sekunden" if ex['hold'] else "Wiederholungen"
-
-            st.markdown(f"""<div style="display:flex;align-items:center;gap:10px;margin:14px 0 4px 0">
-                <span style="font-size:20px">{info['icon']}</span>
-                <span style="font-weight:800;color:white;font-size:14px">{ex['name']}</span>
-                <span style="font-size:10px;color:{info['color']};background:{info['color']}22;
-                    padding:2px 8px;border-radius:10px;border:1px solid {info['color']}55">
-                    Stufe {ex['level_idx']+1}/{ex['level_count']}</span>
+    if rest_day:
+        st.markdown(f"""<div style="background:rgba(155,89,182,0.1);border:1px solid rgba(155,89,182,0.35);
+            border-radius:14px;padding:18px 22px;margin-bottom:16px">
+            <div style="font-size:20px;font-weight:900;color:#a29bfe;margin-bottom:6px">😴 Heute ist Ruhetag</div>
+            <div style="font-size:13px;color:rgba(255,255,255,0.65)">{rationale}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.3);margin-top:8px">
+              Aktive Regeneration: leichtes Spazieren, Dehnen — oder einfach erholen.</div>
+        </div>""", unsafe_allow_html=True)
+    else:
+        track_chips = " ".join(
+            f'<span style="background:{CAL_TRACKS[t]["color"]}22;color:{CAL_TRACKS[t]["color"]};'
+            f'border:1px solid {CAL_TRACKS[t]["color"]}55;border-radius:10px;'
+            f'padding:2px 10px;font-size:11px;font-weight:700">'
+            f'{CAL_TRACKS[t]["icon"]} {CAL_TRACKS[t]["label"]}</span>'
+            for t in today_tracks if t in CAL_TRACKS
+        )
+        st.markdown(f"""<div style="background:rgba(0,212,255,0.05);border:1px solid rgba(0,212,255,0.18);
+            border-radius:14px;padding:16px 20px;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:800;color:white">Heute trainierst du:</span>
+              {track_chips}
+              <span style="font-size:10px;color:{src_color};background:{src_color}18;
+                    border:1px solid {src_color}44;padding:2px 8px;border-radius:8px">{src_badge}</span>
             </div>
-            <div style="font-size:11.5px;color:rgba(255,255,255,0.45);margin-bottom:6px">
-                {ex['cue']} · Ziel: {ex['sets']} Sätze × {ex['target_reps']} {unit}</div>""",
-                        unsafe_allow_html=True)
+            {f'<div style="font-size:12px;color:rgba(255,255,255,0.5);font-style:italic">{rationale}</div>' if rationale else ''}
+            {f'<div style="font-size:12px;color:#ffd700;margin-top:6px">💡 {tip}</div>' if tip else ''}
+        </div>""", unsafe_allow_html=True)
 
-            ic1, ic2 = st.columns(2)
-            with ic1:
-                inputs[track] = {}
-                inputs[track]['sets'] = st.number_input(
-                    f"Sätze geschafft", min_value=0, max_value=ex['sets'] + 2, value=ex['sets'],
-                    key=f"cal_sets_{track}")
-            with ic2:
-                inputs[track]['best'] = st.number_input(
-                    f"Beste Leistung ({unit})", min_value=0, max_value=ex['target_reps'] * 3 + 10,
-                    value=ex['target_reps'], key=f"cal_best_{track}")
-
-        notes = st.text_input("Notiz (optional)", key="cal_notes", placeholder="z.B. heute schwer, wenig Schlaf")
-        submitted = st.form_submit_button("✅ Training abschließen", use_container_width=True, type="primary")
-
-    if submitted:
-        level_ups = []
-        clean_count = 0
-        for track in today_tracks:
-            result = log_cal_session(track, inputs[track]['sets'], inputs[track]['best'], notes)
-            if result['clean']:
-                clean_count += 1
-            if result['leveled_up']:
-                level_ups.append((track, result['new_level_name']))
-
-        points = 40 * clean_count + 15 * (len(today_tracks) - clean_count)
-        if entry_id:
-            toggle_done(entry_id, True, points=points)
+    # KI / Rest-Day Steuerung
+    ki_col, rest_col = st.columns(2)
+    with ki_col:
+        if st.button(
+            "🤖 KI-Plan neu erstellen" if api_key else "🤖 KI-Plan (API-Key fehlt)",
+            key="train_ki_plan_btn", use_container_width=True, disabled=not api_key
+        ):
+            with st.spinner("KI analysiert deine gesamten Trainingsdaten und erstellt deinen perfekten Plan …"):
+                ki_result = ki_generate_daily_exercises(api_key)
+            if ki_result and not ki_result.get('error'):
+                today_str = date.today().isoformat()
+                if ki_result.get('rest_day'):
+                    save_training_plan({'tracks': [], 'rest_day': True, 'source': 'ki',
+                                        'rationale': ki_result.get('day_rationale', ''),
+                                        'tip': ki_result.get('tip', '')})
+                    update_todays_training_entry([])
+                else:
+                    tracks_data = ki_result.get('tracks', [])
+                    save_daily_exercises(today_str, tracks_data, meta={
+                        'rest_day': False, 'source': 'ki',
+                        'rationale': ki_result.get('day_rationale', ''),
+                        'weekly_focus': ki_result.get('weekly_focus', ''),
+                        'tip': ki_result.get('tip', '')
+                    })
+                    update_todays_training_entry([td['track'] for td in tracks_data])
+                st.toast("Neuer KI-Trainingsplan erstellt!", icon="🤖")
+                st.rerun()
+            elif ki_result and ki_result.get('error'):
+                st.error(f"KI-Fehler: {ki_result['error']}")
+    with rest_col:
+        if rest_day:
+            if st.button("💪 Doch trainieren", key="train_undo_rest_btn", use_container_width=True):
+                today_str = date.today().isoformat()
+                conn_r = sqlite3.connect(DB_PATH)
+                conn_r.execute("DELETE FROM settings WHERE key=?", (f"training_plan_{today_str}",))
+                conn_r.execute("DELETE FROM daily_training_exercises WHERE plan_date=?", (today_str,))
+                conn_r.commit()
+                conn_r.close()
+                st.rerun()
         else:
-            sync_daily_training()
-            entry_id, _ = get_todays_training_entry_id()
-            if entry_id:
-                toggle_done(entry_id, True, points=points)
+            if st.button("😴 Als Ruhetag markieren", key="train_rest_day_btn", use_container_width=True):
+                today_str = date.today().isoformat()
+                save_training_plan({'tracks': [], 'rest_day': True, 'source': 'manual',
+                                    'rationale': 'Manuell als Ruhetag markiert.'})
+                conn_r = sqlite3.connect(DB_PATH)
+                conn_r.execute("DELETE FROM daily_training_exercises WHERE plan_date=?", (today_str,))
+                conn_r.commit()
+                conn_r.close()
+                update_todays_training_entry([])
+                st.rerun()
 
-        st.balloons()
-        st.success(f"🎉 Training geloggt — {clean_count}/{len(today_tracks)} Übungen sauber geschafft, +{points} Punkte!")
-        for track, new_name in level_ups:
-            st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,149,0,0.1));
-                border:1px solid rgba(255,215,0,0.5);border-radius:12px;padding:14px 18px;margin-top:8px">
-                <span style="font-size:18px">⬆️</span> <strong style="color:#ffd700">Level-Up: {CAL_TRACKS[track]['label']}!</strong><br>
-                <span style="color:rgba(255,255,255,0.7);font-size:13px">Neue Übung freigeschaltet: <strong>{new_name}</strong></span>
+    # ── Heutiges Training ──────────────────────────────────────────
+    ki_exercises = get_daily_exercises()  # {track: [exercise_dicts]}
+    has_ki_plan = bool(ki_exercises)
+
+    if not rest_day:
+        if not has_ki_plan and not today_tracks:
+            st.markdown("---")
+            st.markdown("""<div style="text-align:center;padding:32px;background:rgba(0,212,255,0.04);
+                border:1px dashed rgba(0,212,255,0.25);border-radius:16px;margin-top:8px">
+                <div style="font-size:32px;margin-bottom:12px">🤖</div>
+                <div style="font-size:16px;font-weight:800;color:white;margin-bottom:8px">Noch kein KI-Plan für heute</div>
+                <div style="font-size:13px;color:rgba(255,255,255,0.5)">Klicke oben auf <strong>KI-Plan neu erstellen</strong> — die KI analysiert deine gesamte Trainingshistorie und erstellt den perfekt auf dich zugeschnittenen Plan für heute.</div>
             </div>""", unsafe_allow_html=True)
-        time.sleep(0.3)
-        st.rerun()
+
+        elif has_ki_plan:
+            st.markdown("### 💪 Dein heutiges Training")
+            entry_id, entry_done = get_todays_training_entry_id()
+
+            if streak['trained_today']:
+                st.success("Heute bereits geloggt — stark! Du kannst unten trotzdem nachtragen.")
+
+            # Wochenfoukus & Tipp aus dem gespeicherten Plan
+            stored_wf = today_plan.get('weekly_focus', '')
+            if stored_wf:
+                st.markdown(f"""<div style="background:rgba(255,215,0,0.07);border-left:3px solid #ffd700;
+                    border-radius:0 10px 10px 0;padding:10px 16px;margin-bottom:16px;font-size:12.5px;color:rgba(255,255,255,0.75)">
+                    <strong style="color:#ffd700">Wochenfokus:</strong> {stored_wf}</div>""",
+                    unsafe_allow_html=True)
+
+            # ── KI Trainingsbriefing ───────────────────────────────────
+            today_str_b = date.today().isoformat()
+            briefing_key = f"training_briefing_{today_str_b}"
+            briefing_cached = get_setting(briefing_key)
+            briefing_data = None
+            if briefing_cached:
+                try:
+                    briefing_data = json.loads(briefing_cached)
+                except Exception:
+                    pass
+
+            brief_col, new_col = st.columns([3, 1])
+            with brief_col:
+                st.markdown("#### 🧠 KI Trainingsbriefing")
+            with new_col:
+                if api_key:
+                    if st.button("🔄 Neu", key="briefing_regen_btn", use_container_width=True):
+                        conn_b = sqlite3.connect(DB_PATH)
+                        conn_b.execute("DELETE FROM settings WHERE key=?", (briefing_key,))
+                        conn_b.commit()
+                        conn_b.close()
+                        with st.spinner("KI analysiert…"):
+                            briefing_data = ki_training_briefing(api_key)
+                        st.rerun()
+
+            if not briefing_data and api_key:
+                if st.button("🧠 KI Briefing erstellen", key="briefing_gen_btn", use_container_width=True):
+                    with st.spinner("KI analysiert dein Training tief…"):
+                        briefing_data = ki_training_briefing(api_key)
+                    st.rerun()
+
+            if briefing_data and not briefing_data.get('error'):
+                # Übergeordnetes Ziel
+                ueberziel = briefing_data.get('ueberziel', '')
+                if ueberziel:
+                    st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(0,212,255,0.08),rgba(155,89,182,0.08));
+                        border:1px solid rgba(0,212,255,0.25);border-radius:14px;padding:18px 22px;margin-bottom:14px">
+                        <div style="font-size:11px;font-weight:700;color:rgba(0,212,255,0.7);letter-spacing:1.5px;margin-bottom:8px">
+                          🎯 ÜBERGEORDNETES ZIEL</div>
+                        <div style="font-size:14px;color:rgba(255,255,255,0.9);line-height:1.6">{ueberziel}</div>
+                    </div>""", unsafe_allow_html=True)
+
+                # Meilensteine
+                milestones = briefing_data.get('meilensteine', [])
+                if milestones:
+                    ms_html = ""
+                    for ms in milestones:
+                        status = ms.get('status', 'offen')
+                        if status == 'erreicht':
+                            s_color, s_icon, s_bg = '#2ecc71', '✅', 'rgba(46,204,113,0.08)'
+                            s_border = 'rgba(46,204,113,0.3)'
+                        elif status == 'in_arbeit':
+                            s_color, s_icon, s_bg = '#00d4ff', '⚡', 'rgba(0,212,255,0.08)'
+                            s_border = 'rgba(0,212,255,0.35)'
+                        else:
+                            s_color, s_icon, s_bg = 'rgba(255,255,255,0.3)', '○', 'rgba(255,255,255,0.03)'
+                            s_border = 'rgba(255,255,255,0.1)'
+                        ms_html += f"""<div style="background:{s_bg};border:1px solid {s_border};
+                            border-radius:10px;padding:12px 16px;margin-bottom:8px">
+                            <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                              <span style="font-size:14px">{s_icon}</span>
+                              <span style="font-size:13px;font-weight:800;color:{s_color}">{ms.get('name','')}</span>
+                              <span style="font-size:10px;color:{s_color};background:{s_color}18;
+                                padding:1px 7px;border-radius:6px;margin-left:auto">{status.upper()}</span>
+                            </div>
+                            <div style="font-size:12px;color:rgba(255,255,255,0.6);line-height:1.5">{ms.get('beschreibung','')}</div>
+                            {f'<div style="font-size:11px;color:{s_color};margin-top:5px;font-weight:600">→ {ms.get("stand","")}</div>' if ms.get('stand') else ''}
+                        </div>"""
+                    st.markdown(f"""<div style="margin-bottom:14px">
+                        <div style="font-size:11px;font-weight:700;color:rgba(255,215,0,0.7);letter-spacing:1.5px;margin-bottom:8px">
+                          🏆 MEILENSTEINE</div>
+                        {ms_html}
+                    </div>""", unsafe_allow_html=True)
+
+                # Ziel heute + Warum
+                ziel_heute = briefing_data.get('ziel_heute', '')
+                warum_heute = briefing_data.get('warum_heute', '')
+                verbindung = briefing_data.get('verbindung_zum_ziel', '')
+                if ziel_heute:
+                    st.markdown(f"""<div style="background:rgba(255,215,0,0.07);border:1px solid rgba(255,215,0,0.25);
+                        border-radius:14px;padding:16px 20px;margin-bottom:14px">
+                        <div style="font-size:11px;font-weight:700;color:rgba(255,215,0,0.7);letter-spacing:1.5px;margin-bottom:8px">
+                          ⚡ ZIEL HEUTE</div>
+                        <div style="font-size:15px;font-weight:800;color:#ffd700;margin-bottom:10px">{ziel_heute}</div>
+                        {f'<div style="font-size:12.5px;color:rgba(255,255,255,0.7);line-height:1.6;margin-bottom:8px">{warum_heute}</div>' if warum_heute else ''}
+                        {f'<div style="font-size:12px;color:rgba(0,212,255,0.8);line-height:1.6;border-top:1px solid rgba(255,255,255,0.08);padding-top:8px;margin-top:4px">🔗 {verbindung}</div>' if verbindung else ''}
+                    </div>""", unsafe_allow_html=True)
+
+                # Übungen mit tiefen Erklärungen
+                uebungen = briefing_data.get('uebungen', [])
+                if uebungen:
+                    st.markdown("""<div style="font-size:11px;font-weight:700;color:rgba(255,255,255,0.5);
+                        letter-spacing:1.5px;margin-bottom:10px">📋 ÜBUNGEN IM DETAIL</div>""",
+                        unsafe_allow_html=True)
+                    for ub in uebungen:
+                        track_label = ub.get('track', '')
+                        track_color = '#00d4ff'
+                        for tk, ti in CAL_TRACKS.items():
+                            if ti['label'].lower() in track_label.lower() or track_label.lower() in ti['label'].lower():
+                                track_color = ti['color']
+                                break
+                        with st.expander(f"**{ub.get('name','')}** — {track_label}", expanded=False):
+                            cols_ub = st.columns(2)
+                            with cols_ub[0]:
+                                was = ub.get('was_trainiert', '')
+                                if was:
+                                    st.markdown(f"""<div style="background:rgba(255,255,255,0.04);border-radius:10px;
+                                        padding:12px;margin-bottom:8px">
+                                        <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);
+                                          letter-spacing:1px;margin-bottom:5px">💪 WAS WIRD TRAINIERT</div>
+                                        <div style="font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5">{was}</div>
+                                    </div>""", unsafe_allow_html=True)
+                                bio = ub.get('biomechanik', '')
+                                if bio:
+                                    st.markdown(f"""<div style="background:rgba(255,255,255,0.04);border-radius:10px;
+                                        padding:12px">
+                                        <div style="font-size:10px;font-weight:700;color:rgba(255,255,255,0.4);
+                                          letter-spacing:1px;margin-bottom:5px">⚙️ BIOMECHANIK</div>
+                                        <div style="font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5">{bio}</div>
+                                    </div>""", unsafe_allow_html=True)
+                            with cols_ub[1]:
+                                warum = ub.get('warum_jetzt', '')
+                                if warum:
+                                    st.markdown(f"""<div style="background:rgba(0,212,255,0.05);border-radius:10px;
+                                        padding:12px;margin-bottom:8px;border:1px solid rgba(0,212,255,0.15)">
+                                        <div style="font-size:10px;font-weight:700;color:rgba(0,212,255,0.6);
+                                          letter-spacing:1px;margin-bottom:5px">🎯 WARUM JETZT</div>
+                                        <div style="font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5">{warum}</div>
+                                    </div>""", unsafe_allow_html=True)
+                                langzeit = ub.get('langzeitwirkung', '')
+                                if langzeit:
+                                    st.markdown(f"""<div style="background:rgba(46,204,113,0.05);border-radius:10px;
+                                        padding:12px;border:1px solid rgba(46,204,113,0.15)">
+                                        <div style="font-size:10px;font-weight:700;color:rgba(46,204,113,0.6);
+                                          letter-spacing:1px;margin-bottom:5px">📈 LANGZEITWIRKUNG</div>
+                                        <div style="font-size:12px;color:rgba(255,255,255,0.8);line-height:1.5">{langzeit}</div>
+                                    </div>""", unsafe_allow_html=True)
+                            mental = ub.get('mental_cue', '')
+                            if mental:
+                                st.markdown(f"""<div style="background:rgba(255,215,0,0.06);border-radius:8px;
+                                    padding:10px 14px;margin-top:4px;border-left:3px solid #ffd700">
+                                    <span style="font-size:11px;font-weight:700;color:#ffd700">🧠 MENTAL CUE: </span>
+                                    <span style="font-size:12px;color:rgba(255,255,255,0.85);font-style:italic">{mental}</span>
+                                </div>""", unsafe_allow_html=True)
+
+                # Coach-Wort
+                coach_wort = briefing_data.get('coach_wort', '')
+                if coach_wort:
+                    st.markdown(f"""<div style="background:rgba(155,89,182,0.08);border:1px solid rgba(155,89,182,0.3);
+                        border-radius:12px;padding:14px 18px;margin-bottom:18px">
+                        <span style="font-size:11px;font-weight:700;color:#a29bfe">🎙️ COACH: </span>
+                        <span style="font-size:13px;color:rgba(255,255,255,0.85);font-style:italic">{coach_wort}</span>
+                    </div>""", unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            with st.form("ki_log_form"):
+                inputs = {}
+                for track, exercises in ki_exercises.items():
+                    info = CAL_TRACKS.get(track, {'icon': '🏋️', 'color': '#aaaaaa', 'label': track})
+                    track_color = info['color']
+                    track_icon = info['icon']
+                    track_label = info['label']
+                    st.markdown(f"""<div style="margin:20px 0 10px 0;display:flex;align-items:center;gap:10px">
+                        <span style="font-size:22px">{track_icon}</span>
+                        <span style="font-size:16px;font-weight:900;color:{track_color}">{track_label}</span>
+                    </div>""", unsafe_allow_html=True)
+                    inputs[track] = []
+                    for i, ex in enumerate(exercises):
+                        is_hold = ex['hold_seconds'] > 0
+                        unit = "Sek" if is_hold else "Wdh"
+                        target_val = ex['hold_seconds'] if is_hold else ex['reps']
+                        diff_color = '#2ecc71' if ex['difficulty'] <= 3 else ('#f39c12' if ex['difficulty'] <= 6 else '#e74c3c')
+                        diff_label = '🟢 Leicht' if ex['difficulty'] <= 3 else ('🟡 Mittel' if ex['difficulty'] <= 6 else '🔴 Hart')
+                        st.markdown(f"""<div style="background:rgba(255,255,255,0.03);border:1px solid {track_color}33;
+                            border-radius:12px;padding:14px 16px;margin-bottom:8px">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:6px">
+                              <div>
+                                <div style="font-size:14px;font-weight:800;color:white">{ex['name']}</div>
+                                <div style="font-size:11px;color:rgba(255,255,255,0.45);margin-top:3px">
+                                  Ziel: {ex['sets']} Sätze × {target_val} {unit}</div>
+                              </div>
+                              <span style="font-size:10px;color:{diff_color};background:{diff_color}18;
+                                padding:3px 9px;border-radius:8px;border:1px solid {diff_color}44;white-space:nowrap">{diff_label}</span>
+                            </div>
+                            {f'<div style="font-size:11.5px;color:{track_color};margin-top:8px;font-style:italic">⚡ {ex["cue"]}</div>' if ex.get("cue") else ''}
+                            {f'<div style="font-size:11px;color:rgba(255,255,255,0.4);margin-top:4px">→ {ex["why"]}</div>' if ex.get("why") else ''}
+                        </div>""", unsafe_allow_html=True)
+                        ec1, ec2 = st.columns(2)
+                        with ec1:
+                            sets_done = st.number_input(
+                                "Sätze geschafft", min_value=0, max_value=ex['sets'] + 3,
+                                value=ex['sets'], key=f"ki_sets_{track}_{i}")
+                        with ec2:
+                            perf_done = st.number_input(
+                                f"Beste Leistung ({unit})", min_value=0,
+                                max_value=max(target_val * 3, target_val + 30),
+                                value=target_val, key=f"ki_perf_{track}_{i}")
+                        inputs[track].append({
+                            'ex': ex, 'sets_done': sets_done, 'perf_done': perf_done,
+                            'is_hold': is_hold, 'target_val': target_val
+                        })
+
+                notes = st.text_input("Notiz (optional)", key="ki_notes",
+                                       placeholder="z.B. heute schwer, wenig Schlaf")
+                submitted = st.form_submit_button("✅ Training abschließen",
+                                                   use_container_width=True, type="primary")
+
+            if submitted:
+                today_str = date.today().isoformat()
+                clean_count = 0
+                total_exercises = 0
+                for track, ex_inputs in inputs.items():
+                    for inp in ex_inputs:
+                        ex = inp['ex']
+                        clean = log_ki_exercise(
+                            today_str, track, ex['name'],
+                            inp['sets_done'], inp['perf_done'],
+                            ex['sets'], inp['target_val'],
+                            is_hold=inp['is_hold'], notes=notes
+                        )
+                        total_exercises += 1
+                        if clean:
+                            clean_count += 1
+
+                points = 40 * clean_count + 15 * (total_exercises - clean_count)
+                entry_id, _ = get_todays_training_entry_id()
+                if entry_id:
+                    toggle_done(entry_id, True, points=points)
+                else:
+                    sync_daily_training()
+                    entry_id, _ = get_todays_training_entry_id()
+                    if entry_id:
+                        toggle_done(entry_id, True, points=points)
+
+                st.balloons()
+                st.success(f"Training geloggt — {clean_count}/{total_exercises} Übungen sauber, +{points} Punkte!")
+                time.sleep(0.3)
+                st.rerun()
+
+        else:
+            # Fallback: alter Track-basierter Plan (noch kein KI-Exercices-Plan, aber tracks bekannt)
+            st.markdown("### 💪 Heutiges Training")
+            entry_id, entry_done = get_todays_training_entry_id()
+            if streak['trained_today']:
+                st.success("Heute bereits geloggt — stark!")
+            with st.form("cal_log_form"):
+                inputs = {}
+                for track in today_tracks:
+                    info = CAL_TRACKS[track]
+                    p = prog[track]
+                    ex = get_cal_exercise(track, p['level'], p['bonus'])
+                    unit = "Sekunden" if ex['hold'] else "Wiederholungen"
+                    st.markdown(f"""<div style="display:flex;align-items:center;gap:10px;margin:14px 0 4px 0">
+                        <span style="font-size:20px">{info['icon']}</span>
+                        <span style="font-weight:800;color:white;font-size:14px">{ex['name']}</span>
+                        <span style="font-size:10px;color:{info['color']};background:{info['color']}22;
+                            padding:2px 8px;border-radius:10px;border:1px solid {info['color']}55">
+                            Stufe {ex['level_idx']+1}/{ex['level_count']}</span>
+                    </div>
+                    <div style="font-size:11.5px;color:rgba(255,255,255,0.45);margin-bottom:6px">
+                        {ex['cue']} · Ziel: {ex['sets']} Sätze × {ex['target_reps']} {unit}</div>""",
+                                unsafe_allow_html=True)
+                    ic1, ic2 = st.columns(2)
+                    with ic1:
+                        inputs[track] = {}
+                        inputs[track]['sets'] = st.number_input(
+                            "Sätze geschafft", min_value=0, max_value=ex['sets'] + 2, value=ex['sets'],
+                            key=f"cal_sets_{track}")
+                    with ic2:
+                        inputs[track]['best'] = st.number_input(
+                            f"Beste Leistung ({unit})", min_value=0, max_value=ex['target_reps'] * 3 + 10,
+                            value=ex['target_reps'], key=f"cal_best_{track}")
+                notes = st.text_input("Notiz (optional)", key="cal_notes",
+                                       placeholder="z.B. heute schwer, wenig Schlaf")
+                submitted = st.form_submit_button("✅ Training abschließen",
+                                                   use_container_width=True, type="primary")
+            if submitted:
+                level_ups = []
+                clean_count = 0
+                for track in today_tracks:
+                    result = log_cal_session(track, inputs[track]['sets'], inputs[track]['best'], notes)
+                    if result['clean']:
+                        clean_count += 1
+                    if result['leveled_up']:
+                        level_ups.append((track, result['new_level_name']))
+                points = 40 * clean_count + 15 * (len(today_tracks) - clean_count)
+                if entry_id:
+                    toggle_done(entry_id, True, points=points)
+                else:
+                    sync_daily_training()
+                    entry_id, _ = get_todays_training_entry_id()
+                    if entry_id:
+                        toggle_done(entry_id, True, points=points)
+                st.balloons()
+                st.success(f"Training geloggt — {clean_count}/{len(today_tracks)} sauber, +{points} Punkte!")
+                for track, new_name in level_ups:
+                    st.markdown(f"""<div style="background:linear-gradient(135deg,rgba(255,215,0,0.15),rgba(255,149,0,0.1));
+                        border:1px solid rgba(255,215,0,0.5);border-radius:12px;padding:14px 18px;margin-top:8px">
+                        <span style="font-size:18px">⬆️</span>
+                        <strong style="color:#ffd700">Level-Up: {CAL_TRACKS[track]['label']}!</strong><br>
+                        <span style="color:rgba(255,255,255,0.7);font-size:13px">
+                          Neue Übung: <strong>{new_name}</strong></span>
+                    </div>""", unsafe_allow_html=True)
+                time.sleep(0.3)
+                st.rerun()
 
     st.markdown("---")
 
@@ -7772,8 +11221,7 @@ def render_training_page():
     st.markdown("---")
 
     # ── KI Trainingscoach ─────────────────────────────────────────
-    st.markdown("### 🤖 KI Trainingscoach")
-    api_key = get_setting('nvidia_api_key', '')
+    st.markdown("### 🤖 KI Trainingscoach (Muster-Analyse)")
     if not api_key:
         st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
     else:
@@ -8104,17 +11552,24 @@ def _household_status_badge(t):
     return '<span style="color:rgba(255,255,255,0.4)">— noch nie erledigt</span>'
 
 
-def _render_household_section(status_all, frequency, today_str):
+def _render_household_section(status_all, frequency, today_str, show_label=True):
     tasks = [t for t in status_all if t['frequency'] == frequency]
-    st.markdown(f"#### {HOUSEHOLD_FREQUENCY_LABELS[frequency]}")
+    if not tasks:
+        return
+    if show_label:
+        st.markdown(f"#### {HOUSEHOLD_FREQUENCY_LABELS[frequency]}")
     for t in tasks:
-        c1, c2, c3 = st.columns([0.5, 0.28, 0.22])
-        with c1:
-            st.markdown(f"{t['icon']} **{t['label']}** <span style='font-size:10px;color:rgba(255,255,255,0.35)'>"
-                        f"~{t['est_minutes']} Min</span>", unsafe_allow_html=True)
-        with c2:
+        is_custom = t.get('is_custom', False)
+        cols = st.columns([0.44, 0.26, 0.20, 0.10])
+        with cols[0]:
+            st.markdown(
+                f"{t['icon']} **{t['label']}** "
+                f"<span style='font-size:10px;color:rgba(255,255,255,0.35)'>~{t['est_minutes']} Min</span>",
+                unsafe_allow_html=True
+            )
+        with cols[1]:
             st.markdown(_household_status_badge(t), unsafe_allow_html=True)
-        with c3:
+        with cols[2]:
             if frequency == 'daily':
                 done_today = t['last_done'] == today_str
                 new = st.checkbox("erledigt", value=done_today, key=f"hh_{t['key']}_{today_str}",
@@ -8129,94 +11584,228 @@ def _render_household_section(status_all, frequency, today_str):
                 if st.button("✅ Erledigt", key=f"hh_btn_{t['key']}_{today_str}", use_container_width=True):
                     log_household_task(t['key'], today_str)
                     st.rerun()
+        with cols[3]:
+            if is_custom:
+                if st.button("🗑️", key=f"hh_del_{t['key']}", help="Aufgabe löschen"):
+                    delete_custom_household_task(t['key'])
+                    st.rerun()
+            else:
+                if st.button("🙈", key=f"hh_hide_{t['key']}", help="Ausblenden"):
+                    hide_builtin_household_task(t['key'])
+                    st.rerun()
 
 
 def render_haushalt_page():
     st.title("🏡 Haushalt")
-    st.caption("Wiederkehrende Aufgaben für ein Wohlfühl-Zuhause — als Pause zwischen Deep-Work-Sessions.")
 
-    today_str = date.today().isoformat()
-    status_all = get_household_status()
+    today_str   = date.today().isoformat()
+    status_all  = get_household_status()
     clean_score = household_clean_score()
-    wohlfuehl = household_wohlfuehl_index()
+    wohlfuehl   = household_wohlfuehl_index()
+    streak      = get_household_daily_streak()
 
     st.markdown(_household_score_hero_html(clean_score, wohlfuehl), unsafe_allow_html=True)
 
-    st.markdown("---")
+    # ── Sync-Status & To-Do Info ──────────────────────────────────
+    conn_hh = sqlite3.connect(DB_PATH)
+    hh_in_todos = conn_hh.execute(
+        "SELECT COUNT(*) FROM entries WHERE entry_date=? AND tags LIKE '%haushalt%' AND done=0",
+        (today_str,)
+    ).fetchone()[0]
+    hh_done_today = conn_hh.execute(
+        "SELECT COUNT(*) FROM entries WHERE entry_date=? AND tags LIKE '%haushalt%' AND done=1",
+        (today_str,)
+    ).fetchone()[0]
+    conn_hh.close()
 
-    # ── Workload-bewusster Pausen-Vorschlag ───────────────────────
-    suggestion = suggest_household_break_tasks()
-    st.markdown("### ☕ Haushalts-Pausen heute")
-    wl = suggestion['workload']
-    st.caption(f"Zeitbudget heute: ~{suggestion['budget_minutes']} Min "
-              f"({wl['undone_count']} offene Aufgaben, {wl['deadlines_today']} Deadlines heute)")
-    if suggestion['tasks']:
-        for t in suggestion['tasks']:
-            st.markdown(f"- {t['icon']} **{t['label']}** (~{t['est_minutes']} Min)"
-                       + (" 🔴 überfällig" if t['overdue'] else ""))
-    else:
-        st.success("Heute ist nichts dringend fällig — alles im grünen Bereich. 🎉")
-
-    st.markdown("---")
-
-    # ── Streak ─────────────────────────────────────────────────────
-    streak = get_household_daily_streak()
-    st.markdown(f"""<div style="text-align:center;background:rgba(46,204,113,0.06);border-radius:14px;
-        padding:14px;border:1px solid rgba(46,204,113,0.25);margin-bottom:10px">
-        <div style="font-size:24px">🏡</div>
-        <div style="font-size:22px;font-weight:900;color:#2ecc71">{streak['current']}</div>
-        <div style="font-size:10px;color:rgba(255,255,255,0.4)">TAGE TÄGLICHE HAUSHALTS-ROUTINE VOLL</div>
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown("---")
-
-    # ── Aufgabenlisten nach Frequenz ───────────────────────────────
-    _render_household_section(status_all, 'daily', today_str)
-    st.markdown("")
-    _render_household_section(status_all, 'weekly', today_str)
-    st.markdown("")
-    _render_household_section(status_all, 'monthly', today_str)
+    due_count = sum(1 for t in status_all if t.get('due'))
+    st.markdown(
+        f'<div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);'
+        f'border-radius:12px;padding:12px 18px;margin:10px 0;display:flex;gap:20px;flex-wrap:wrap">'
+        f'<div style="font-size:12px">'
+        f'<span style="color:rgba(255,255,255,0.4)">Fällig heute:</span> '
+        f'<strong style="color:#ff6b6b">{due_count}</strong></div>'
+        f'<div style="font-size:12px">'
+        f'<span style="color:rgba(255,255,255,0.4)">In To-Do-Liste:</span> '
+        f'<strong style="color:#00d4ff">{hh_in_todos} offen</strong>, {hh_done_today} erledigt</div>'
+        f'<div style="font-size:12px">'
+        f'<span style="color:rgba(255,255,255,0.4)">Streak:</span> '
+        f'<strong style="color:#2ecc71">{streak["current"]} 🔥</strong> (Rekord: {streak["longest"]})</div>'
+        f'<div style="font-size:11px;color:rgba(255,255,255,0.3);margin-left:auto">'
+        f'Fällige Tasks werden täglich automatisch in deine To-Dos gezogen</div>'
+        f'</div>',
+        unsafe_allow_html=True
+    )
 
     st.markdown("---")
 
-    # ── KI Haushaltscoach ────────────────────────────────────────
-    st.markdown("### 🤖 KI Haushaltscoach")
-    api_key = get_setting('nvidia_api_key', '')
-    if not api_key:
-        st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
-    else:
-        if st.button("🧠 Haushalts-Pausen für heute empfehlen", key="haushalt_coach_btn"):
-            with st.spinner("Coach plant deine Pausen…"):
-                st.session_state['_haushalt_coach_result'] = ki_haushalt_coach(api_key)
-        result = st.session_state.get('_haushalt_coach_result')
-        if result:
-            if result.get('error'):
-                st.error(f"Fehler: {result['error']}")
-            else:
-                key_map = {t['key']: t for t in HOUSEHOLD_TASKS}
-                rec_keys = result.get('recommended_keys') or []
-                rec_str = ", ".join(
-                    f"{key_map[k]['icon']} {key_map[k]['label']}" for k in rec_keys if k in key_map
-                ) or "—"
-                st.markdown(f"""<div style="background:rgba(46,204,113,0.06);border:1px solid rgba(46,204,113,0.25);
-                    border-radius:14px;padding:18px 20px">
-                    <div style="font-size:15px;font-weight:800;color:#2ecc71;margin-bottom:10px">
-                        🎙️ {result.get('headline','')}</div>
-                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
-                        <strong>Empfehlung:</strong> {rec_str}</div>
-                    <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
-                        <strong>Begründung:</strong> {result.get('reasoning','')}</div>
-                    <div style="font-size:12.5px;color:rgba(255,255,255,0.6);margin-bottom:8px">
-                        <strong>Heute bewusst nicht:</strong> {result.get('skip_today','') or '—'}</div>
-                    <div style="font-size:12.5px;color:rgba(255,255,255,0.5);font-style:italic">
-                        {result.get('motivation','')}</div>
-                </div>""", unsafe_allow_html=True)
+    # ── Tabs ─────────────────────────────────────────────────────
+    tab_aufg, tab_neu, tab_coach, tab_heatmap = st.tabs([
+        "📋 Aufgaben", "➕ Neue Aufgabe", "🤖 KI Coach", "📅 Konsistenz"
+    ])
 
-    st.markdown("---")
+    with tab_aufg:
+        # Alle Frequenzen
+        for freq in ['daily', 'weekly', 'monthly', 'custom']:
+            tasks_in_freq = [t for t in status_all if t['frequency'] == freq]
+            if tasks_in_freq:
+                _render_household_section(status_all, freq, today_str)
+                st.markdown("")
 
-    # ── Konsistenz-Heatmap ─────────────────────────────────────────
-    st.markdown("### 📅 Konsistenz (letzte 60 Tage)")
-    st.markdown(_household_heatmap_html(), unsafe_allow_html=True)
+    with tab_neu:
+        st.subheader("✏️ Eigene Haushaltsaufgabe erstellen")
+        st.caption("Füge alles hinzu was du in deinem Haushalt machst — die App zieht es dann automatisch in deine To-Dos.")
+
+        with st.form("new_household_task_form", clear_on_submit=True):
+            col_icon, col_label = st.columns([0.12, 0.88])
+            with col_icon:
+                new_icon = st.text_input("Icon", value="🏡", max_chars=4)
+            with col_label:
+                new_label = st.text_input("Aufgabe*", placeholder="z.B. Auto waschen, Balkon aufräumen, ...")
+
+            col_freq, col_mins = st.columns(2)
+            with col_freq:
+                new_freq = st.selectbox("Wiederholung", [
+                    ('daily',   '📅 Täglich'),
+                    ('weekly',  '🗓️ Wöchentlich'),
+                    ('monthly', '📆 Monatlich'),
+                    ('custom',  '🔧 Eigener Rhythmus'),
+                ], format_func=lambda x: x[1])
+                freq_key = new_freq[0]
+            with col_mins:
+                new_mins = st.number_input("Dauer (Minuten)", min_value=1, max_value=180, value=15)
+
+            interval_days = None
+            if freq_key == 'custom':
+                interval_days = st.number_input(
+                    "Alle X Tage", min_value=1, max_value=365, value=14,
+                    help="z.B. 14 = alle 2 Wochen, 90 = alle 3 Monate"
+                )
+
+            submitted = st.form_submit_button("➕ Aufgabe speichern", use_container_width=True, type="primary")
+            if submitted:
+                if not new_label.strip():
+                    st.error("Bitte einen Namen eingeben.")
+                else:
+                    add_custom_household_task(
+                        label=new_label.strip(),
+                        icon=new_icon.strip() or '🏡',
+                        frequency=freq_key,
+                        est_minutes=int(new_mins),
+                        interval_days=int(interval_days) if interval_days else (
+                            HOUSEHOLD_FREQUENCY_DAYS.get(freq_key) or 7
+                        )
+                    )
+                    st.success(f"✅ {new_icon} {new_label} gespeichert!")
+                    st.rerun()
+
+        # Eigene Aufgaben anzeigen
+        custom_status = [t for t in status_all if t.get('is_custom')]
+        if custom_status:
+            st.markdown("---")
+            st.subheader("🔧 Deine eigenen Aufgaben")
+            for t in custom_status:
+                c1, c2, c3, c4 = st.columns([0.45, 0.27, 0.20, 0.08])
+                with c1:
+                    freq_txt = (f"alle {t.get('interval_days')}d"
+                                if t['frequency'] == 'custom'
+                                else HOUSEHOLD_FREQUENCY_LABELS.get(t['frequency'],''))
+                    st.markdown(
+                        f"{t['icon']} **{t['label']}** "
+                        f"<span style='font-size:10px;color:rgba(255,255,255,0.35)'>"
+                        f"~{t['est_minutes']} Min · {freq_txt}</span>",
+                        unsafe_allow_html=True
+                    )
+                with c2:
+                    st.markdown(_household_status_badge(t), unsafe_allow_html=True)
+                with c3:
+                    if st.button("✅ Erledigt", key=f"custom_done_{t['key']}_{today_str}", use_container_width=True):
+                        log_household_task(t['key'], today_str)
+                        st.rerun()
+                with c4:
+                    if st.button("🗑️", key=f"custom_del_{t['key']}", help="Löschen"):
+                        delete_custom_household_task(t['key'])
+                        st.rerun()
+        else:
+            st.info("Noch keine eigenen Aufgaben — erstelle deine erste oben.")
+
+        # Ausgeblendete Built-in-Aufgaben wiederherstellen
+        hidden_keys = get_hidden_builtin_keys()
+        if hidden_keys:
+            st.markdown("---")
+            st.subheader("🙈 Ausgeblendete Aufgaben")
+            st.caption("Diese Standard-Aufgaben sind ausgeblendet. Klicke auf Wiederherstellen um sie zurückzubringen.")
+            hidden_tasks = [t for t in HOUSEHOLD_TASKS if t['key'] in hidden_keys]
+            for ht in hidden_tasks:
+                hr1, hr2 = st.columns([0.8, 0.2])
+                with hr1:
+                    freq_label = HOUSEHOLD_FREQUENCY_LABELS.get(ht['frequency'], '')
+                    st.markdown(
+                        f"{ht['icon']} **{ht['label']}** "
+                        f"<span style='font-size:10px;color:rgba(255,255,255,0.35)'>"
+                        f"~{ht['est_minutes']} Min · {freq_label}</span>",
+                        unsafe_allow_html=True
+                    )
+                with hr2:
+                    if st.button("↩️ Wiederherstellen", key=f"hh_restore_{ht['key']}", use_container_width=True):
+                        show_builtin_household_task(ht['key'])
+                        st.rerun()
+
+    with tab_coach:
+        st.subheader("☕ Haushalts-Pausen heute")
+        suggestion = suggest_household_break_tasks()
+        wl = suggestion['workload']
+        st.caption(f"Zeitbudget: ~{suggestion['budget_minutes']} Min "
+                   f"({wl['undone_count']} offene Aufgaben, {wl['deadlines_today']} Deadlines)")
+        if suggestion['tasks']:
+            for t in suggestion['tasks']:
+                col_a, col_b = st.columns([0.8, 0.2])
+                with col_a:
+                    st.markdown(f"{t['icon']} **{t['label']}** (~{t['est_minutes']} Min)"
+                                + (" 🔴 überfällig" if t['overdue'] else ""))
+                with col_b:
+                    if st.button("✅", key=f"pause_done_{t['key']}", use_container_width=True):
+                        log_household_task(t['key'], today_str)
+                        st.rerun()
+        else:
+            st.success("Heute ist nichts dringend fällig — alles im grünen Bereich. 🎉")
+
+        st.markdown("---")
+        api_key = get_setting('nvidia_api_key', '')
+        if not api_key:
+            st.info("Hinterlege einen NVIDIA API-Key in den Einstellungen, um den KI-Coach zu nutzen.")
+        else:
+            if st.button("🧠 KI-Empfehlung für heute", key="haushalt_coach_btn"):
+                with st.spinner("Coach plant deine Pausen…"):
+                    st.session_state['_haushalt_coach_result'] = ki_haushalt_coach(api_key)
+            result = st.session_state.get('_haushalt_coach_result')
+            if result:
+                if result.get('error'):
+                    st.error(f"Fehler: {result['error']}")
+                else:
+                    all_key_map = {t['key']: t for t in get_all_household_tasks()}
+                    rec_keys = result.get('recommended_keys') or []
+                    rec_str = ", ".join(
+                        f"{all_key_map[k]['icon']} {all_key_map[k]['label']}"
+                        for k in rec_keys if k in all_key_map
+                    ) or "—"
+                    st.markdown(f"""<div style="background:rgba(46,204,113,0.06);border:1px solid rgba(46,204,113,0.25);
+                        border-radius:14px;padding:18px 20px">
+                        <div style="font-size:15px;font-weight:800;color:#2ecc71;margin-bottom:10px">
+                            🎙️ {result.get('headline','')}</div>
+                        <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                            <strong>Empfehlung:</strong> {rec_str}</div>
+                        <div style="font-size:13px;color:rgba(255,255,255,0.8);margin-bottom:8px">
+                            <strong>Begründung:</strong> {result.get('reasoning','')}</div>
+                        <div style="font-size:12.5px;color:rgba(255,255,255,0.6);margin-bottom:8px">
+                            <strong>Heute bewusst nicht:</strong> {result.get('skip_today','') or '—'}</div>
+                        <div style="font-size:12.5px;color:rgba(255,255,255,0.5);font-style:italic">
+                            {result.get('motivation','')}</div>
+                    </div>""", unsafe_allow_html=True)
+
+    with tab_heatmap:
+        st.subheader("📅 Konsistenz (letzte 60 Tage)")
+        st.markdown(_household_heatmap_html(), unsafe_allow_html=True)
 
 
 # ========== MAIN ==========
@@ -8239,6 +11828,7 @@ def main():
     sync_recurring_tasks()
     sync_project_tasks()
     sync_daily_training()
+    sync_household_to_entries()
 
     # Fire pending backup (non-blocking, background)
     if st.session_state.pop('_backup_pending', False):
@@ -8293,6 +11883,9 @@ def main():
   <div style="font-size:18px;font-weight:800;color:#00d4ff">{total_points()} Pts</div>
 </div>""", unsafe_allow_html=True)
         return
+
+    # ── KI Coach Bar (permanent auf jeder Seite) ─────────────────
+    _render_ki_coach_bar()
 
     if page == "Start":
         render_start_page()
